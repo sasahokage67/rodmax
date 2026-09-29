@@ -6,6 +6,7 @@ import { LandingPage } from './components/LandingPage';
 import { AuthPage } from './components/AuthPage';
 import { FishingGame } from './components/FishingGame';
 import { BestiaryModal } from './components/BestiaryModal';
+import { syncProfileToStorage } from './utils/authUtils';
 
 const DEFAULT_GUEST_PROFILE: AnglerProfile = {
   callsign: 'Guest_Angler',
@@ -70,7 +71,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     try {
       if (profile.isRegistered) {
-        localStorage.setItem('rodmax_profile_v2', JSON.stringify(profile));
+        syncProfileToStorage(profile);
       }
     } catch {
       // storage unavailable
@@ -79,6 +80,10 @@ export const App: React.FC = () => {
 
   const updateProfile = (updates: Partial<AnglerProfile>) => {
     setProfile(prev => ({ ...prev, ...updates }));
+  };
+
+  const setFullProfile = (newProfile: AnglerProfile) => {
+    setProfile(newProfile);
   };
 
   const handleCatchFish = (caught: CaughtFish) => {
@@ -176,6 +181,7 @@ export const App: React.FC = () => {
           <AuthPage
             profile={profile}
             updateProfile={updateProfile}
+            setFullProfile={setFullProfile}
             setTab={setTab}
             onSellFish={handleSellFish}
           />

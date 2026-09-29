@@ -3,6 +3,7 @@ import { AnglerProfile, TabType, CaughtFish } from '../types';
 import { FISH_DATABASE } from '../data/fishDatabase';
 import { getLevelInfo } from '../utils/levelUtils';
 import { sound } from '../audio';
+import { registerUser, loginUser } from '../utils/authUtils';
 import { 
   Shield, 
   CheckCircle2, 
@@ -21,7 +22,10 @@ import {
   Edit3,
   Camera,
   Check,
-  X
+  X,
+  LogIn,
+  KeyRound,
+  UserPlus
 } from 'lucide-react';
 
 const AVAILABLE_AVATARS = [
@@ -110,6 +114,7 @@ const AVAILABLE_AVATARS = [
 interface AuthPageProps {
   profile: AnglerProfile;
   updateProfile: (p: Partial<AnglerProfile>) => void;
+  setFullProfile?: (p: AnglerProfile) => void;
   setTab: (tab: TabType) => void;
   onSellFish?: (fishId?: string) => void;
 }
@@ -117,12 +122,14 @@ interface AuthPageProps {
 export const AuthPage: React.FC<AuthPageProps> = ({ 
   profile, 
   updateProfile, 
+  setFullProfile,
   setTab,
   onSellFish 
 }) => {
   // Avatar modal state
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
-  // Registration form states
+  // Auth mode: 'REGISTER' | 'LOGIN'
+  const [authMode, setAuthMode] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
   const [callsign, setCallsign] = useState(profile.isRegistered ? profile.callsign : '');
   const [password, setPassword] = useState('');
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -146,7 +153,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setCallsign(val);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!callsign.trim()) {
       setInputError('ВВЕДИТЕ ПОЗЫВНОЙ (НИКНЕЙМ)');
@@ -156,17 +163,36 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       setInputError('НИКНЕЙМ ДОЛЖЕН БЫТЬ НЕ МЕНЕЕ 3 СИМВОЛОВ');
       return;
     }
+    if (password.length < 8) {
+      setInputError(`ПАРОЛЬ ДОЛЖЕН СОДЕРЖАТЬ НЕ МЕНЕЕ 8 СИМВОЛОВ (СЕЙЧАС: ${password.length})`);
+      return;
+    }
 
-    sound.playCoin();
-    updateProfile({
-      callsign: callsign.trim(),
-      isRegistered: true,
-      coins: profile.isRegistered ? profile.coins : Math.max(profile.coins, 1000)
-    });
-    setSavedSuccess(true);
-    setTimeout(() => {
-      setSavedSuccess(false);
-    }, 1200);
+    if (authMode === 'REGISTER') {
+      const res = registerUser(callsign, password, profile);
+      if (!res.success) {
+        setInputError(res.error || 'ОШИБКА РЕГИСТРАЦИИ');
+        return;
+      }
+      sound.playCoin();
+      if (setFullProfile && res.profile) {
+        setFullProfile(res.profile);
+      } else if (res.profile) {
+        updateProfile(res.profile);
+      }
+    } else {
+      const res = loginUser(callsign, password);
+      if (!res.success) {
+        setInputError(res.error || 'ОШИБКА ВХОДА');
+        return;
+      }
+      sound.playCoin();
+      if (setFullProfile && res.profile) {
+        setFullProfile(res.profile);
+      } else if (res.profile) {
+        updateProfile(res.profile);
+      }
+    }
   };
 
   const handleGuestPlay = () => {
@@ -279,15 +305,46 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
         <div className="relative z-10 w-full max-w-xl bg-[#09150f]/95 border-2 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.2)] p-6 sm:p-8 pixel-corners">
           
+          {/* Auth Mode Switcher Tabs */}
+          <div className="grid grid-cols-2 gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => { sound.playReelClick(); setAuthMode('REGISTER'); setInputError(null); }}
+              className={`py-3 px-3 font-arcade text-xs tracking-wider border-2 transition-all flex items-center justify-center gap-2 ${
+                authMode === 'REGISTER'
+                  ? 'bg-emerald-500 text-black border-emerald-300 font-bold shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                  : 'bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-white'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>СОЗДАТЬ АККАУНТ</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { sound.playReelClick(); setAuthMode('LOGIN'); setInputError(null); }}
+              className={`py-3 px-3 font-arcade text-xs tracking-wider border-2 transition-all flex items-center justify-center gap-2 ${
+                authMode === 'LOGIN'
+                  ? 'bg-emerald-500 text-black border-emerald-300 font-bold shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                  : 'bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-white'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>ВОЙТИ В СУЩЕСТВУЮЩИЙ</span>
+            </button>
+          </div>
+
           <div className="flex items-center justify-between border-b-2 border-emerald-500/40 pb-4 mb-6">
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 bg-emerald-400 animate-pulse" />
               <div>
                 <h1 className="font-arcade text-emerald-400 text-sm sm:text-base tracking-wider">
-                  РЕГИСТРАЦИЯ АККАУНТА
+                  {authMode === 'REGISTER' ? 'РЕГИСТРАЦИЯ АККАУНТА' : 'ВХОД В ЛИЧНЫЙ КАБИНЕТ'}
                 </h1>
                 <p className="font-arcade text-[8px] text-emerald-600 mt-1">
-                  СОЗДАЙ ПРОФИЛЬ ДЛЯ СОХРАНЕНИЯ УЛОВА И ИНВЕНТАРЯ
+                  {authMode === 'REGISTER' 
+                    ? 'СОЗДАЙ ПРОФИЛЬ ДЛЯ СОХРАНЕНИЯ УЛОВА И ИНВЕНТАРЯ' 
+                    : 'ВВЕДИ СВОИ ДАННЫЕ ДЛЯ ЗАГРУЗКИ САДКА И БАЛАНСА'}
                 </p>
               </div>
             </div>
@@ -300,9 +357,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               <strong className="font-arcade text-[9px] text-amber-400 block mb-1">
-                ЗАЧЕМ НУЖНА РЕГИСТРАЦИЯ?
+                {authMode === 'REGISTER' ? 'ПРЕИМУЩЕСТВА РЕГИСТРАЦИИ:' : 'ДОСТУП К ПРОФИЛЮ:'}
               </strong>
-              Только у зарегистрированных рыболовов работает <span className="text-white font-bold">Личный кабинет и постоянный Инвентарь</span>, где подсчитывается каждый выловленный экземпляр, накапливаются монеты и ведутся рекорды!
+              {authMode === 'REGISTER' 
+                ? 'Только у зарегистрированных рыболовов работает Личный кабинет и постоянный Инвентарь, где подсчитывается каждый выловленный экземпляр, накапливаются монеты и ведутся рекорды!' 
+                : 'Войдите под своим позывным и паролем (от 8 символов), чтобы восстановить весь ваш пойманный улов, уровень и баланс монет.'}
             </div>
           </div>
 
@@ -313,7 +372,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </div>
           )}
 
-          <form onSubmit={handleRegister} className="space-y-5">
+          <form onSubmit={handleAuthSubmit} className="space-y-5">
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="font-arcade text-[10px] text-emerald-300 flex items-center gap-1.5">
@@ -338,26 +397,48 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </div>
 
             <div>
-              <label className="font-arcade text-[10px] text-emerald-300 flex items-center gap-1.5 mb-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                ПАРОЛЬ / ПИН-КОД ДОСТУПА
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full bg-[#040906] border-2 border-emerald-500/60 focus:border-emerald-400 focus:outline-none px-4 py-2.5 font-mono text-xs text-emerald-100 placeholder:text-zinc-600"
-              />
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="font-arcade text-[10px] text-emerald-300 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                  ПАРОЛЬ ДОСТУПА
+                </label>
+                <span className={`font-mono text-[10px] ${password.length >= 8 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {password.length >= 8 ? '✓ МИНИМУМ 8 СИМВОЛОВ ВЫПОЛНЕН' : `${password.length}/8 МИН. СИМВОЛОВ`}
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (inputError) setInputError(null);
+                  }}
+                  placeholder="Минимум 8 символов (например, 12345678)"
+                  className="w-full bg-[#040906] border-2 border-emerald-500/60 focus:border-emerald-400 focus:outline-none px-4 py-2.5 font-mono text-xs text-emerald-100 placeholder:text-zinc-600 shadow-inner"
+                />
+                <div className="absolute right-3 top-2.5 font-mono text-[10px] text-zinc-500">
+                  [≥ 8 СИМВ]
+                </div>
+              </div>
             </div>
 
-            <div className="pt-3 flex flex-col sm:flex-row gap-3">
+            <div className="pt-2 flex flex-col sm:flex-row gap-3">
               <button
                 type="submit"
                 className="flex-1 py-3.5 px-6 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-black font-arcade text-xs tracking-wider border-2 border-emerald-300 shadow-[0_4px_0_#064e3b] transition-all flex items-center justify-center gap-2"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>СОЗДАТЬ АККАУНТ И ОТКРЫТЬ КАБИНЕТ</span>
+                {authMode === 'REGISTER' ? (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>СОЗДАТЬ АККАУНТ И ОТКРЫТЬ КАБИНЕТ</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>ВОЙТИ В СВОЙ АККАУНТ</span>
+                  </>
+                )}
               </button>
 
               <button
@@ -368,6 +449,41 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 <Play className="w-3.5 h-3.5 text-amber-400" />
                 <span>ИГРАТЬ БЕЗ РЕГИСТРАЦИИ</span>
               </button>
+            </div>
+
+            {/* Quick toggle link */}
+            <div className="pt-2 text-center border-t border-emerald-500/20">
+              {authMode === 'REGISTER' ? (
+                <div className="font-mono text-xs text-zinc-400">
+                  Уже есть созданный аккаунт?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playReelClick();
+                      setAuthMode('LOGIN');
+                      setInputError(null);
+                    }}
+                    className="text-emerald-400 hover:text-emerald-300 underline font-arcade text-[10px] ml-1"
+                  >
+                    Войти в существующий
+                  </button>
+                </div>
+              ) : (
+                <div className="font-mono text-xs text-zinc-400">
+                  Впервые на RODMAX?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playReelClick();
+                      setAuthMode('REGISTER');
+                      setInputError(null);
+                    }}
+                    className="text-emerald-400 hover:text-emerald-300 underline font-arcade text-[10px] ml-1"
+                  >
+                    Зарегистрировать новый профиль
+                  </button>
+                </div>
+              )}
             </div>
           </form>
 
