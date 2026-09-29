@@ -65,8 +65,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Thumbs Up (👍) Gesture Detection & Cast Charge State
   const [isThumbsUp, setIsThumbsUp] = useState(false);
+  const [isWrongGesture, setIsWrongGesture] = useState(false);
   const [thumbsUpHoldProgress, setThumbsUpHoldProgress] = useState(0);
   const thumbsUpCounterRef = useRef(0);
+  const wrongGestureCounterRef = useRef(0);
   const thumbsUpHoldCountRef = useRef(0);
   const idleEnterTimeRef = useRef(Date.now());
 
@@ -244,6 +246,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       idleEnterTimeRef.current = Date.now();
       thumbsUpHoldCountRef.current = 0;
       setThumbsUpHoldProgress(0);
+      setIsThumbsUp(false);
+      setIsWrongGesture(false);
+      thumbsUpCounterRef.current = 0;
+      wrongGestureCounterRef.current = 0;
       idleTimerRef.current = setTimeout(() => {
         setShowIdleHint(true);
       }, 6500);
@@ -255,6 +261,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       setShowIdleHint(false);
       thumbsUpHoldCountRef.current = 0;
       setThumbsUpHoldProgress(0);
+      setIsThumbsUp(false);
+      setIsWrongGesture(false);
+      thumbsUpCounterRef.current = 0;
+      wrongGestureCounterRef.current = 0;
     }
 
     return () => {
@@ -389,9 +399,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             }
           }
 
-          let isCandidate = false;
+          let isThumbsUpCandidate = false;
+          let isWrongGestureCandidate = false;
 
-          // Forgiving threshold: hand has at least 8 pixels (works at standard desktop distance)
+          // Hand presence threshold: hand has at least 8 pixels (works at standard desktop distance)
           if (skinCount >= 8 && (skinMaxY - skinMinY) >= 5 && (skinMaxX - skinMinX) >= 4) {
             const handH = skinMaxY - skinMinY + 1;
             const handW = skinMaxX - skinMinX + 1;
@@ -425,22 +436,44 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             const topW = topMaxX >= topMinX ? (topMaxX - topMinX + 1) : 0;
             const bottomW = bottomMaxX >= bottomMinX ? (bottomMaxX - bottomMinX + 1) : 0;
 
-            // Low-threshold Thumbs Up Criteria:
-            // Upright or compact hand with top thumb protrusion and bottom palm/fist mass
-            if (topPixels >= 2 && bottomPixels >= 4 && handH >= handW * 0.50 && topW <= (bottomW * 1.35 + 2)) {
-              isCandidate = true;
+            // Strict distinction: Thumbs Up (👍) vs Other Gestures (open palm, flat hand, spread fingers)
+            // Thumbs Up characteristics:
+            // 1. Single thumb in top 40% (topW <= bottomW * 0.68)
+            // 2. Curled fist mass in bottom 60% (bottomPixels >= topPixels * 1.30 and bottomPixels >= 6)
+            // 3. Thumb protrusion exists (topPixels >= 2)
+            // 4. Hand is vertical/compact (handH >= handW * 0.55 && handH <= handW * 2.5)
+            const isNarrowThumb = topW > 0 && bottomW > 0 && topW <= Math.max(3, Math.floor(bottomW * 0.68));
+            const isSolidFist = bottomPixels >= Math.max(6, Math.floor(topPixels * 1.30));
+            const isVerticalHand = handH >= handW * 0.55 && handH <= handW * 2.5;
+            const hasThumbProtrusion = topPixels >= 2;
+
+            if (isNarrowThumb && isSolidFist && isVerticalHand && hasThumbProtrusion) {
+              isThumbsUpCandidate = true;
+            } else {
+              // Hand is detected, but fingers are spread or it's an open palm / non-thumbs-up gesture
+              isWrongGestureCandidate = true;
             }
           }
 
-          // Leaky integrator: fast attack (+2), slow decay (-1) -> instant trigger, zero flicker
-          if (isCandidate) {
-            thumbsUpCounterRef.current = Math.min(4, thumbsUpCounterRef.current + 2);
+          // Leaky integrators: fast attack (+2), slow decay (-1) -> instant trigger, zero flicker
+          if (isThumbsUpCandidate) {
+            thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 2);
+            wrongGestureCounterRef.current = Math.max(0, wrongGestureCounterRef.current - 2);
           } else {
             thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
           }
 
           const thumbsUpActive = thumbsUpCounterRef.current >= 2;
           setIsThumbsUp(thumbsUpActive);
+
+          if (isWrongGestureCandidate && !thumbsUpActive) {
+            wrongGestureCounterRef.current = Math.min(6, wrongGestureCounterRef.current + 2);
+          } else {
+            wrongGestureCounterRef.current = Math.max(0, wrongGestureCounterRef.current - 1);
+          }
+
+          const wrongGestureActive = !thumbsUpActive && wrongGestureCounterRef.current >= 2;
+          setIsWrongGesture(wrongGestureActive);
 
           // Hold-to-Cast with Thumbs Up (👍) in IDLE stage
           // 1.2s grace period on entry prevents immediate accidental bite on load
@@ -469,8 +502,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           }
         } else {
           thumbsUpCounterRef.current = 0;
+          wrongGestureCounterRef.current = 0;
           thumbsUpHoldCountRef.current = 0;
           setIsThumbsUp(false);
+          setIsWrongGesture(false);
           setThumbsUpHoldProgress(0);
         }
       }
@@ -499,6 +534,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setShowIdleHint(false);
     thumbsUpHoldCountRef.current = 0;
     setThumbsUpHoldProgress(0);
+    setIsThumbsUp(false);
+    setIsWrongGesture(false);
+    thumbsUpCounterRef.current = 0;
+    wrongGestureCounterRef.current = 0;
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
@@ -1156,15 +1195,21 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.7)]' 
                 : isThumbsUp 
                 ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
+                : isWrongGesture
+                ? 'bg-amber-950/85 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.5)] animate-pulse'
                 : 'bg-black/60 border-zinc-700/80 text-zinc-300'
             }`}>
               <div className="font-arcade text-xs flex items-center justify-center gap-2">
-                <span className={`text-xl ${thumbsUpHoldProgress > 0 ? 'animate-bounce' : ''}`}>👍</span>
+                <span className={`text-xl ${thumbsUpHoldProgress > 0 ? 'animate-bounce' : isWrongGesture ? 'animate-bounce' : ''}`}>
+                  {isWrongGesture ? '⚠️' : '👍'}
+                </span>
                 <span>
                   {thumbsUpHoldProgress >= 100
                     ? 'ЗАБРОС УДОЧКИ!'
                     : thumbsUpHoldProgress > 0
                     ? `УДЕРЖИВАЙТЕ ЛАЙК: ${thumbsUpHoldProgress}%`
+                    : isWrongGesture
+                    ? 'НЕ ТОТ ЖЕСТ! ПОКАЖИТЕ ИМЕННО ЛАЙК 👍'
                     : 'ПОКАЖИТЕ ЖЕСТ «ЛАЙК» (👍) ДЛЯ СТАРТА'}
                 </span>
               </div>
@@ -1172,15 +1217,27 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Charge Progress Bar */}
               <div className="w-full bg-zinc-800 h-2 mt-2 rounded-full overflow-hidden border border-zinc-700">
                 <div 
-                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 transition-all duration-75 shadow-[0_0_8px_#10b981]"
+                  className={`h-full transition-all duration-75 ${
+                    isWrongGesture
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_8px_#f59e0b]'
+                      : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_8px_#10b981]'
+                  }`}
                   style={{ width: `${thumbsUpHoldProgress}%` }}
                 />
               </div>
 
-              <div className="font-mono text-[8px] text-zinc-400 mt-1 flex justify-between items-center">
-                <span>Удерживайте 0.3 сек</span>
-                <span>Или кликните кнопку ниже</span>
-              </div>
+              {isWrongGesture ? (
+                <div className="mt-2 py-1 px-2 bg-amber-500/20 border border-amber-400/30 rounded text-center">
+                  <div className="font-mono text-[9px] text-amber-200 font-semibold">
+                    ✋ Обнаружена рука/ладонь! Сожмите кулак и поднимите большой палец вверх 👍
+                  </div>
+                </div>
+              ) : (
+                <div className="font-mono text-[8px] text-zinc-400 mt-1 flex justify-between items-center">
+                  <span>Удерживайте 0.3 сек</span>
+                  <span>Или кликните кнопку ниже</span>
+                </div>
+              )}
             </div>
 
             <button
@@ -1654,8 +1711,24 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className={`w-1.5 h-1.5 rounded-full ${cameraStatus === 'ACTIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                 <span>ВЕБ-КАМЕРА</span>
               </div>
-              <div className={isThumbsUp ? 'text-emerald-400 font-bold animate-pulse' : cameraStatus === 'ACTIVE' ? 'text-zinc-300' : 'text-amber-400'}>
-                {isThumbsUp ? '👍 ЛАЙК' : cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
+              <div className={
+                isThumbsUp 
+                  ? 'text-emerald-400 font-bold animate-pulse' 
+                  : isWrongGesture 
+                  ? 'text-amber-400 font-bold animate-pulse' 
+                  : cameraStatus === 'ACTIVE' 
+                  ? 'text-zinc-300' 
+                  : 'text-amber-400'
+              }>
+                {isThumbsUp 
+                  ? '👍 ЛАЙК' 
+                  : isWrongGesture 
+                  ? '⚠️ НЕ ЛАЙК' 
+                  : cameraStatus === 'ACTIVE' 
+                  ? '60 FPS' 
+                  : cameraStatus === 'CONNECTING' 
+                  ? 'ЗАПУСК...' 
+                  : 'ОТКЛ'}
               </div>
             </div>
 
@@ -1668,13 +1741,18 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 className="w-full h-full object-cover transform -scale-x-100"
               />
 
-              {/* Thumbs Up Detected Badge Overlay */}
-              {isThumbsUp && (
+              {/* Thumbs Up / Wrong Gesture Detected Badge Overlay */}
+              {isThumbsUp ? (
                 <div className="absolute top-1 left-1 bg-emerald-950/90 border border-emerald-400 px-1.5 py-0.5 rounded font-arcade text-[8px] text-emerald-300 animate-pulse shadow-[0_0_10px_#10b981] z-20 flex items-center gap-1">
                   <span>👍</span>
                   <span>ЛАЙК</span>
                 </div>
-              )}
+              ) : isWrongGesture ? (
+                <div className="absolute top-1 left-1 bg-amber-950/90 border border-amber-400 px-1.5 py-0.5 rounded font-arcade text-[7px] text-amber-300 animate-pulse shadow-[0_0_10px_#f59e0b] z-20 flex items-center gap-1">
+                  <span>⚠️</span>
+                  <span>НЕ ТОТ ЖЕСТ</span>
+                </div>
+              ) : null}
 
               {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
               {cameraStatus === 'ACTIVE' && (
