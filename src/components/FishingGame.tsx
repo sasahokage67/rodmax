@@ -129,31 +129,31 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
-        // Fast catch (~1.0 - 1.2s)
-        return { targetRadius: 26, swimSpeed: 0.12, gain: 3.5, loss: 0.30, changeInterval: 42, evasion: 0.04 };
+        // Fast catch (~1.5s - 2.0s)
+        return { targetRadius: 26, swimSpeed: 0.12, gain: 2.2, loss: 0.40, changeInterval: 42, evasion: 0.04 };
       case 'UNCOMMON':
-        // Snappy catch (~1.5 - 1.8s)
-        return { targetRadius: 20, swimSpeed: 0.18, gain: 2.8, loss: 0.40, changeInterval: 24, evasion: 0.10 };
+        // Snappy catch (~2.0s - 2.5s)
+        return { targetRadius: 20, swimSpeed: 0.18, gain: 1.9, loss: 0.45, changeInterval: 24, evasion: 0.08 };
       case 'RARE':
-        // Dynamic (~2.0 - 2.3s)
-        return { targetRadius: 17, swimSpeed: 0.23, gain: 2.3, loss: 0.48, changeInterval: 18, evasion: 0.16 };
+        // Dynamic (~2.5s - 2.8s)
+        return { targetRadius: 17, swimSpeed: 0.23, gain: 1.7, loss: 0.50, changeInterval: 18, evasion: 0.12 };
       case 'EPIC':
-        // Lively (~2.3 - 2.7s)
-        return { targetRadius: 15, swimSpeed: 0.28, gain: 2.0, loss: 0.55, changeInterval: 14, evasion: 0.20 };
+        // Lively (~2.8s - 3.2s)
+        return { targetRadius: 15, swimSpeed: 0.28, gain: 1.5, loss: 0.55, changeInterval: 14, evasion: 0.16 };
       case 'MYTHIC':
-        // Agile (~2.7 - 3.0s)
-        return { targetRadius: 13, swimSpeed: 0.34, gain: 1.8, loss: 0.62, changeInterval: 11, evasion: 0.25 };
+        // Agile (~3.2s - 3.5s)
+        return { targetRadius: 13, swimSpeed: 0.34, gain: 1.4, loss: 0.60, changeInterval: 11, evasion: 0.20 };
       case 'SECRET':
-        // Evasive (~3.0 - 3.3s)
-        return { targetRadius: 11, swimSpeed: 0.40, gain: 1.6, loss: 0.70, changeInterval: 9, evasion: 0.30 };
+        // Evasive (~3.5s - 3.8s)
+        return { targetRadius: 11, swimSpeed: 0.40, gain: 1.3, loss: 0.65, changeInterval: 9, evasion: 0.24 };
       case 'GODLY':
-        // Elite (~3.3 - 3.6s)
-        return { targetRadius: 9.5, swimSpeed: 0.46, gain: 1.45, loss: 0.78, changeInterval: 7, evasion: 0.35 };
+        // Elite (~3.8s - 4.0s)
+        return { targetRadius: 9.5, swimSpeed: 0.46, gain: 1.2, loss: 0.70, changeInterval: 7, evasion: 0.28 };
       case 'ARCANE':
-        // Boss tier (~3.6 - 4.0s)
-        return { targetRadius: 8.5, swimSpeed: 0.52, gain: 1.30, loss: 0.85, changeInterval: 6, evasion: 0.42 };
+        // Boss tier (~4.0s - 4.5s)
+        return { targetRadius: 8.5, swimSpeed: 0.52, gain: 1.1, loss: 0.75, changeInterval: 6, evasion: 0.32 };
       default:
-        return { targetRadius: 16, swimSpeed: 0.22, gain: 2.2, loss: 0.50, changeInterval: 20, evasion: 0.18 };
+        return { targetRadius: 16, swimSpeed: 0.22, gain: 1.6, loss: 0.50, changeInterval: 20, evasion: 0.14 };
     }
   };
 
@@ -248,20 +248,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let weightedY = 0;
         let motionPoints = 0;
 
-        // 1. Pass 1: Global Motion & True Apex Y Detection
+        // Fingertip detection: track topmost active motion cluster (fast single pass, zero skin noise)
         let minY = 48;
+        let tipMotionSumX = 0;
+        let tipMotionCount = 0;
 
         for (let i = 0; i < data.length; i += 4) {
-          const r = data[i], g = data[i+1], b = data[i+2];
-          const lumNow = (r + g + b) / 3;
+          const lumNow = (data[i] + data[i+1] + data[i+2]) / 3;
           const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
           const diff = Math.abs(lumNow - lumPrev);
 
-          // Combined motion and foreground skin check
-          const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 8 && (r - b) > 4);
-          const isActive = diff > 16 || (isSkin && diff > 7);
-
-          if (isActive) {
+          if (diff > 20) {
             diffSum += diff;
             const pixelIdx = i / 4;
             const x = pixelIdx % 64;
@@ -270,8 +267,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             weightedY += y;
             motionPoints++;
 
+            // Detect top-most finger points (finger pointing up towards camera)
             if (y < minY) {
               minY = y;
+              tipMotionSumX = x;
+              tipMotionCount = 1;
+            } else if (y <= minY + 2) {
+              tipMotionSumX += x;
+              tipMotionCount++;
             }
           }
         }
@@ -282,45 +285,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           setMotionIntensity(avgMotion);
         }
 
-        if (motionPoints > 8 && minY < 46) {
+        if (motionPoints > 8) {
           // Centroid coordinates (mirrored X)
           const centroidX = (1 - (weightedX / motionPoints) / 64) * 100;
           const centroidY = ((weightedY / motionPoints) / 48) * 100;
 
-          // 2. Pass 2: STRICT Apex Isolation for Index Fingertip
-          // Only gather pixels at the topmost apex [minY, minY + 1.2 rows].
-          // This strictly isolates the index tip and excludes knuckles and curled fingers (4-8px below).
-          let tipMotionSumX = 0;
-          let tipMotionCount = 0;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const pixelIdx = i / 4;
-            const y = Math.floor(pixelIdx / 64);
-            if (y <= minY + 1.2) {
-              const r = data[i], g = data[i+1], b = data[i+2];
-              const lumNow = (r + g + b) / 3;
-              const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
-              const diff = Math.abs(lumNow - lumPrev);
-              const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 8 && (r - b) > 4);
-
-              if (diff > 16 || (isSkin && diff > 7)) {
-                const x = pixelIdx % 64;
-                tipMotionSumX += x;
-                tipMotionCount++;
-              }
-            }
-          }
-
           let rawX = centroidX;
           let rawY = centroidY;
 
-          // Pinpoint focus strictly on index fingertip:
+          // Focus strictly on fingertip apex (90% tip + 10% centroid: zero knuckle pull, zero noise!)
           if (tipMotionCount > 0) {
             const tipX = (1 - (tipMotionSumX / tipMotionCount) / 64) * 100;
-            const tipY = (minY / 48) * 100;
-            // 96% Fingertip Apex + 4% Centroid: Eliminates knuckle/palm downward pull!
-            rawX = tipX * 0.96 + centroidX * 0.04;
-            rawY = tipY * 0.96 + centroidY * 0.04;
+            const tipY = ((minY + 0.8) / 48) * 100;
+            rawX = tipX * 0.90 + centroidX * 0.10;
+            rawY = tipY * 0.90 + centroidY * 0.10;
           }
 
           // Smooth low-pass filter
@@ -1589,17 +1567,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover transform -scale-x-100 ${stage === 'REELING' ? 'opacity-0' : 'opacity-100'}`}
+                className="w-full h-full object-cover transform -scale-x-100"
               />
 
-              {stage === 'REELING' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center font-arcade text-[7px] text-emerald-400 bg-black/90">
-                  <span className="animate-pulse">● КАМЕРА В АРЕНЕ</span>
-                </div>
-              )}
-
               {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
-              {cameraStatus === 'ACTIVE' && stage !== 'REELING' && (
+              {cameraStatus === 'ACTIVE' && (
                 <div 
                   className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 z-10 will-change-transform"
                   style={{
