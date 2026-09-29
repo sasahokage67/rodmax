@@ -16,8 +16,11 @@ import {
   AlertTriangle,
   Target,
   Crosshair,
-  Lightbulb
+  Lightbulb,
+  AlertCircle
 } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
+import { getFishName, getFishDescription, getRarityName } from '../i18n/translations';
 
 interface FishingGameProps {
   profile: AnglerProfile;
@@ -34,6 +37,7 @@ interface Position2D {
 }
 
 export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, openBestiary, setTab }) => {
+  const { language, t } = useLanguage();
   const [stage, setStage] = useState<GameStage>('IDLE');
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
@@ -228,15 +232,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (biteTimeoutRef.current) {
-        clearTimeout(biteTimeoutRef.current);
-      }
-      if (landingIntervalRef.current) {
-        clearInterval(landingIntervalRef.current);
-      }
-      if (idleTimerRef.current) {
-        clearTimeout(idleTimerRef.current);
-      }
+      if (biteTimeoutRef.current) clearTimeout(biteTimeoutRef.current);
+      if (landingIntervalRef.current) clearInterval(landingIntervalRef.current);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+      if (foulIntervalRef.current) clearInterval(foulIntervalRef.current);
+      if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
     };
   }, []);
 
@@ -1147,7 +1148,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {stage === 'IDLE' && (
           <div className="pointer-events-auto p-5 sm:p-6 bg-[#06120b]/95 border-2 border-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.35)] text-center max-w-md w-full space-y-4 pixel-corners">
             <div className="font-arcade text-emerald-400 text-xs sm:text-sm tracking-wider">
-              ГОТОВНОСТЬ К ЗАБРОСУ
+              {language === 'ru' ? 'ГОТОВНОСТЬ К ЗАБРОСУ' : 'READY TO CAST'}
             </div>
 
             {/* Assistance Hint if player waited > 6.5s in IDLE */}
@@ -1155,10 +1156,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div className="p-3 bg-amber-950/90 border border-amber-400 text-amber-200 pixel-corners shadow-[0_0_20px_rgba(245,158,11,0.4)] animate-pulse space-y-1">
                 <div className="font-arcade text-xs flex items-center justify-center gap-1.5 text-amber-300">
                   <Lightbulb className="w-4 h-4 text-amber-400" />
-                  <span>ПОДСКАЗКА: КАК НАЧАТЬ ИГРУ</span>
+                  <span>{language === 'ru' ? 'ПОДСКАЗКА: КАК НАЧАТЬ ИГРУ' : 'TIP: HOW TO START THE GAME'}</span>
                 </div>
                 <div className="font-mono text-[9px] text-zinc-300">
-                  Кликните зеленую кнопку <span className="text-emerald-400 font-bold">[ЗАБРОСИТЬ УДОЧКУ]</span> ниже или нажмите клавишу <span className="text-amber-300 font-bold">[Пробел]</span>!
+                  {language === 'ru' ? (
+                    <>Кликните зеленую кнопку <span className="text-emerald-400 font-bold">[ЗАБРОСИТЬ УДОЧКУ]</span> ниже или нажмите клавишу <span className="text-amber-300 font-bold">[Пробел]</span>!</>
+                  ) : (
+                    <>Click the green <span className="text-emerald-400 font-bold">[CAST LINE]</span> button below or press <span className="text-amber-300 font-bold">[Space]</span>!</>
+                  )}
                 </div>
               </div>
             )}
@@ -1169,25 +1174,27 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="font-arcade text-xs text-cyan-300 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Lightbulb className="w-4 h-4 text-cyan-400" />
-                    <span>СОВЕТЫ ПО ВЫВАЖИВАНИЮ (НЕ УДАЛОСЬ {consecutiveFails}x):</span>
+                    <span>
+                      {language === 'ru' 
+                        ? `СОВЕТЫ ПО ВЫВАЖИВАНИЮ (НЕ УДАЛОСЬ ${consecutiveFails}x):` 
+                        : `REELING TIPS (FAILED ${consecutiveFails}x):`}
+                    </span>
                   </div>
                   <button 
                     onClick={() => setIsGuideOpen(true)}
-                    className="text-[8px] font-arcade text-cyan-400 underline hover:text-white"
+                    className="text-[8px] font-arcade text-cyan-400 underline hover:text-white cursor-pointer"
                   >
-                    ПОЛНЫЙ ГАЙД
+                    {language === 'ru' ? 'ПОЛНЫЙ ГАЙД' : 'FULL GUIDE'}
                   </button>
                 </div>
                 
                 <div className="space-y-1 font-mono text-[9px] text-zinc-200">
-                  <div>• <span className="text-amber-300 font-bold">Не двигайте рукой</span> до поклевки (иначе штраф за фальстарт).</div>
-                  <div>• <span className="text-amber-300 font-bold">При надписи «КЛЮЕТ!»</span> резко дерните пальцем в камеру (окно 0.75с).</div>
-                  <div>• <span className="text-emerald-400 font-bold">Ведите пальцем за рыбой:</span> следите за бирюзовым прицелом ☝️ в окне камеры справа внизу.</div>
+                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'Не двигайте рукой' : 'Do not move hand'}</span> {language === 'ru' ? 'до поклевки (иначе штраф за фальстарт).' : 'before bite (false start penalty).'}</div>
+                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'При надписи «КЛЮЕТ!»' : 'When «FISH ON!» appears'}</span> {language === 'ru' ? 'резко дерните пальцем в камеру (окно 0.75с).' : 'rapidly thrust finger toward camera (0.75s).'}</div>
+                  <div>• <span className="text-emerald-400 font-bold">{language === 'ru' ? 'Ведите пальцем за рыбой:' : 'Steer finger over fish:'}</span> {language === 'ru' ? 'следите за бирюзовым прицелом ☝️ в окне камеры справа внизу.' : 'track the cyan reticle ☝️ in bottom-right camera view.'}</div>
                 </div>
               </div>
             )}
-
-
 
             {/* Gesture Thumbs Up Charge Widget */}
             <div className={`p-3 border transition-all duration-150 pixel-corners ${
@@ -1205,12 +1212,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 </span>
                 <span>
                   {thumbsUpHoldProgress >= 100
-                    ? 'ЗАБРОС УДОЧКИ!'
+                    ? t('fishing.casting')
                     : thumbsUpHoldProgress > 0
-                    ? `УДЕРЖИВАЙТЕ ЛАЙК: ${thumbsUpHoldProgress}%`
+                    ? t('fishing.holdTitle', { progress: thumbsUpHoldProgress })
                     : isWrongGesture
-                    ? 'НЕ ТОТ ЖЕСТ! ПОКАЖИТЕ ИМЕННО ЛАЙК 👍'
-                    : 'ПОКАЖИТЕ ЖЕСТ «ЛАЙК» (👍) ДЛЯ СТАРТА'}
+                    ? t('fishing.wrongGesture')
+                    : t('fishing.readyTitle')}
                 </span>
               </div>
 
@@ -1229,13 +1236,13 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {isWrongGesture ? (
                 <div className="mt-2 py-1 px-2 bg-amber-500/20 border border-amber-400/30 rounded text-center">
                   <div className="font-mono text-[9px] text-amber-200 font-semibold">
-                    ✋ Обнаружена рука/ладонь! Сожмите кулак и поднимите большой палец вверх 👍
+                    {t('fishing.wrongGestureTip')}
                   </div>
                 </div>
               ) : (
                 <div className="font-mono text-[8px] text-zinc-400 mt-1 flex justify-between items-center">
-                  <span>Удерживайте 0.3 сек</span>
-                  <span>Или кликните кнопку ниже</span>
+                  <span>{t('fishing.holdTime')}</span>
+                  <span>{t('fishing.orClick')}</span>
                 </div>
               )}
             </div>
@@ -1244,11 +1251,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               onClick={handleCast}
               className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs tracking-wider border-2 border-emerald-300 shadow-[0_3px_0_#064e3b] transition-all cursor-pointer"
             >
-              [ ЗАБРОСИТЬ УДОЧКУ ]
+              {t('fishing.castBtn')}
             </button>
             
             <div className="text-[9px] font-arcade text-cyan-300">
-              ☝️ УПРАВЛЕНИЕ ОПТИЧЕСКИМ ПРИЦЕЛОМ ПАЛЬЦА ПЕРЕД ВЕБ-КАМЕРОЙ
+              {t('fishing.reticleTip')}
             </div>
           </div>
         )}
@@ -1256,7 +1263,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {/* CASTING Animation phase */}
         {stage === 'CASTING' && (
           <div className="p-4 bg-black/85 border-2 border-emerald-400 font-arcade text-xs sm:text-sm text-emerald-300 animate-pulse pixel-corners shadow-[0_0_20px_rgba(16,185,129,0.4)]">
-            ЗАБРОС ЛЕСКИ В ОКЕАН...
+            {language === 'ru' ? 'ЗАБРОС ЛЕСКИ В ОКЕАН...' : 'CASTING LINE INTO THE ABYSS...'}
           </div>
         )}
 
@@ -1267,48 +1274,53 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div className="p-4 sm:p-5 bg-red-950/95 border-2 border-red-500 pixel-corners text-center space-y-2 animate-shake shadow-[0_0_35px_rgba(239,68,68,0.7)] w-full">
                 <div className="font-arcade text-xs sm:text-sm text-red-300 flex items-center justify-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />
-                  <span>⚠️ ОШИБКА: ФАЛЬСТАРТ!</span>
+                  <span>{t('fishing.foulAlert')}</span>
                 </div>
                 <div className="font-arcade text-[10px] text-amber-300">
-                  ВЫ ДЕРНУЛИ ПАЛЬЦЕМ РАНЬШЕ ПОКЛЕВКИ!
+                  {language === 'ru' ? 'ВЫ ДЕРНУЛИ ПАЛЬЦЕМ РАНЬШЕ ПОКЛЕВКИ!' : 'PREMATURE MOTION DETECTED!'}
                 </div>
                 <div className="font-mono text-[9px] text-zinc-300">
-                  Рыба испугалась! Штрафная пауза: <span className="text-red-400 font-bold">{foulTimeLeft.toFixed(1)}с</span>.
-                  <br />Не спамьте, держите руку неподвижно!
+                  {language === 'ru' ? (
+                    <>Рыба испугалась! Штрафная пауза: <span className="text-red-400 font-bold">{foulTimeLeft.toFixed(1)}с</span>.<br />Не двигайтесь, замрите!</>
+                  ) : (
+                    <>Fish startled! Penalty cooldown: <span className="text-red-400 font-bold">{foulTimeLeft.toFixed(1)}s</span>.<br />Do not move, stay still!</>
+                  )}
                 </div>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3 p-5 bg-[#05110a]/90 border border-emerald-500/60 pixel-corners animate-pulse w-full text-center">
                 <div className="flex items-center justify-center gap-2 text-cyan-400 font-arcade text-xs tracking-wider">
                   <Activity className="w-4 h-4 animate-spin" />
-                  <span>ОЖИДАНИЕ ПОКЛЕВКИ...</span>
+                  <span>{t('fishing.waitingTitle')}</span>
                 </div>
                 <div className="font-mono text-[10px] text-zinc-400">
-                  Держите руку неподвижно! При поклевке резко подвиньте палец в камеру.
+                  {t('fishing.waitingSub')}
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* BITE Event Alert: 0.5s Rapid Strike QTE */}
+        {/* BITE Event Alert: 0.75s Rapid Strike QTE */}
         {stage === 'BITE' && (
           <div 
             onClick={handleStrike}
             className="pointer-events-auto cursor-pointer p-6 sm:p-8 bg-red-950/95 border-4 border-amber-400 text-center animate-bounce shadow-[0_0_60px_rgba(239,68,68,0.8)] pixel-corners space-y-3 max-w-md w-full"
           >
             <div className="font-arcade text-xl sm:text-2xl text-amber-300 tracking-widest drop-shadow-[0_2px_4px_black] animate-pulse">
-              ! КЛЮЕТ !
+              {language === 'ru' ? '! КЛЮЕТ !' : '! FISH ON !'}
             </div>
             <div className="font-arcade text-[10px] sm:text-xs text-white">
-              ☝️ РЕЗКО ПОДВИНЬТЕ ПАЛЕЦ В КАМЕРУ! (ОКНО: 0.75 СЕК)
+              {t('fishing.biteAlert')}
             </div>
 
             {/* Live 0.75s Fast Shrinking Timer Bar */}
             <div className="space-y-1">
               <div className="flex justify-between font-arcade text-[10px]">
-                <span className="text-red-400 font-bold animate-pulse">ОКНО НА ПОДСЕЧКУ:</span>
-                <span className="text-amber-300 font-bold text-xs">{biteTimeLeft.toFixed(2)}с / 0.75с</span>
+                <span className="text-red-400 font-bold animate-pulse">
+                  {language === 'ru' ? 'ОКНО НА ПОДСЕЧКУ:' : 'STRIKE WINDOW:'}
+                </span>
+                <span className="text-amber-300 font-bold text-xs">{biteTimeLeft.toFixed(2)}s / 0.75s</span>
               </div>
               <div className="w-full h-3 bg-black border border-amber-400 p-0.5 overflow-hidden">
                 <div 
@@ -1323,9 +1335,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 e.stopPropagation();
                 handleStrike();
               }}
-              className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-black font-arcade text-xs font-bold border-2 border-white shadow-[0_0_20px_rgba(245,158,11,0.8)]"
+              className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-black font-arcade text-xs font-bold border-2 border-white shadow-[0_0_20px_rgba(245,158,11,0.8)] cursor-pointer"
             >
-              [ ПОДСЕЧЬ ПАЛЬЦЕМ / КЛИК ]
+              {t('fishing.strikeBtn')}
             </button>
           </div>
         )}
@@ -1338,18 +1350,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           >
             <div className="font-arcade text-lg sm:text-xl text-amber-300 tracking-wider flex items-center justify-center gap-2">
               <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
-              <span>! РЫБА НА ПОВЕРХНОСТИ !</span>
+              <span>{language === 'ru' ? '! РЫБА НА ПОВЕРХНОСТИ !' : '! FISH AT SURFACE !'}</span>
             </div>
 
             <div className="font-arcade text-xs text-emerald-300">
-              БЫСТРО ПРИМИТЕ РЫБУ, ИНАЧЕ ОНА ВЫСКОЛЬЗНЕТ!
+              {t('fishing.landingTitle')}
             </div>
 
             {/* 1.0s Live Shrinking Bar */}
             <div className="space-y-1">
               <div className="flex justify-between font-arcade text-[10px]">
-                <span className="text-red-400 font-bold animate-pulse">ОКНО ПРИЕМА ТРОФЕЯ:</span>
-                <span className="text-amber-300 font-bold text-xs">{landingTimeLeft.toFixed(2)}с / 1.00с</span>
+                <span className="text-red-400 font-bold animate-pulse">
+                  {language === 'ru' ? 'ОКНО ПРИЕМА ТРОФЕЯ:' : 'LANDING WINDOW:'}
+                </span>
+                <span className="text-amber-300 font-bold text-xs">{landingTimeLeft.toFixed(2)}s / 1.00s</span>
               </div>
               <div className="w-full h-3 bg-black border border-amber-400 p-0.5 overflow-hidden">
                 <div 
@@ -1364,13 +1378,13 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 e.stopPropagation();
                 handleAcceptCatch();
               }}
-              className="w-full py-4 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-black font-arcade text-xs sm:text-sm font-bold border-2 border-white shadow-[0_0_30px_rgba(16,185,129,0.9)] animate-pulse tracking-widest"
+              className="w-full py-4 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-black font-arcade text-xs sm:text-sm font-bold border-2 border-white shadow-[0_0_30px_rgba(16,185,129,0.9)] animate-pulse tracking-widest cursor-pointer"
             >
-              [ ПРИНЯТЬ РЫБУ В САДОК ]
+              {t('fishing.acceptCatchBtn')}
             </button>
 
             <div className="text-[9px] font-arcade text-zinc-400">
-              💡 Нажмите кнопку, пробел или сделайте взмах рукой в камере!
+              {language === 'ru' ? '💡 Кликните кнопку, нажмите пробел или сделайте рывок пальцем!' : '💡 Click button, press space, or thrust finger in camera!'}
             </div>
           </div>
         )}
@@ -1385,16 +1399,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Header Telemetry */}
               <div className="flex justify-between items-center border-b border-emerald-500/30 pb-2">
                 <div>
-                  <div className="font-arcade text-[9px] text-zinc-400">ДОБЫЧА НА КРЮЧКЕ:</div>
+                  <div className="font-arcade text-[9px] text-zinc-400">
+                    {language === 'ru' ? 'ДОБЫЧА НА КРЮЧКЕ:' : 'HOOKED PREY:'}
+                  </div>
                   <div className="font-arcade text-xs text-emerald-300 tracking-wider animate-pulse">
-                    ??? НЕИЗВЕСТНЫЙ ТРОФЕЙ
+                    {language === 'ru' ? '??? НЕИЗВЕСТНЫЙ ТРОФЕЙ' : '??? UNIDENTIFIED TROPHY'}
                   </div>
                 </div>
 
                 <div className="text-right">
-                  <div className="font-arcade text-[9px] text-zinc-400">ЗОНА ЗАХВАТА:</div>
+                  <div className="font-arcade text-[9px] text-zinc-400">
+                    {language === 'ru' ? 'ЗОНА ЗАХВАТА:' : 'TARGET ZONE:'}
+                  </div>
                   <div className="font-arcade text-xs text-emerald-400">
-                    РАДИУС: {diffParams.targetRadius}%
+                    {language === 'ru' ? 'РАДИУС' : 'RADIUS'}: {diffParams.targetRadius}%
                   </div>
                 </div>
               </div>
@@ -1403,7 +1421,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div className="space-y-2">
                 <div className="space-y-1">
                   <div className="flex justify-between font-arcade text-[9px]">
-                    <span className="text-zinc-400">ПРОГРЕСС ВЫВАЖИВАНИЯ:</span>
+                    <span className="text-zinc-400">
+                      {language === 'ru' ? 'ПРОГРЕСС ВЫВАЖИВАНИЯ:' : 'REELING PROGRESS:'}
+                    </span>
                     <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
                       {Math.round(catchProgress)}% / 100%
                     </span>
@@ -1420,10 +1440,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1 pt-1 border-t border-emerald-500/20">
                   <div className="flex justify-between font-arcade text-[8px]">
                     <span className={offTargetMs > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}>
-                      {offTargetMs > 0 ? `⚠️ СХОД ЦЕЛИ (НАКОПЛЕНИЕ): ${(offTargetMs / 1000).toFixed(2)}с / 1.50с` : '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)'}
+                      {offTargetMs > 0 
+                        ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(offTargetMs / 1000).toFixed(2)}с / 1.50с` : `⚠️ OFF-TARGET: ${(offTargetMs / 1000).toFixed(2)}s / 1.50s`) 
+                        : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)' : '✓ TARGET LOCKED (0.00s / 1.50s)')}
                     </span>
                     <span className={offTargetMs > 1000 ? 'text-red-400 font-bold' : offTargetMs > 500 ? 'text-amber-400' : 'text-emerald-400'}>
-                      ЗАПАС: {Math.max(0, (1500 - offTargetMs) / 1000).toFixed(2)}с
+                      {language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: {Math.max(0, (1500 - offTargetMs) / 1000).toFixed(2)}s
                     </span>
                   </div>
                   <div className="w-full h-2 bg-black border border-zinc-700 p-0.5 overflow-hidden">
@@ -1444,9 +1466,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   : 'bg-amber-950/80 text-amber-300 border-amber-500 animate-pulse'
               }`}>
                 {isLockedOn ? (
-                  <span>🎯 ТОЧНЫЙ ЗАХВАТ! УДЕРЖИВАЙТЕ ПАЛЕЦ НА РЫБЕ! (+100%)</span>
+                  <span>{language === 'ru' ? '🎯 ТОЧНЫЙ ЗАХВАТ! УДЕРЖИВАЙТЕ ПАЛЕЦ НА РЫБЕ! (+100%)' : '🎯 TARGET LOCKED! KEEP FINGER OVER FISH! (+100%)'}</span>
                 ) : (
-                  <span>☝️ НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В КАМЕРЕ!</span>
+                  <span>{language === 'ru' ? '☝️ НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В КАМЕРЕ!' : '☝️ STEER YOUR INDEX FINGER OVER THE FISH!'}</span>
                 )}
               </div>
 
@@ -1510,7 +1532,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   <div className={`absolute -bottom-5 px-1.5 py-0.2 bg-black/90 border font-arcade text-[7px] truncate ${
                     isLockedOn ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'
                   }`}>
-                    {isLockedOn ? 'ЗАХВАТ 100%' : 'ЦЕЛЬ ДЛЯ ПАЛЬЦА'}
+                    {isLockedOn ? (language === 'ru' ? 'ЗАХВАТ 100%' : 'LOCKED 100%') : (language === 'ru' ? 'ЦЕЛЬ ДЛЯ ПАЛЬЦА' : 'FINGER TARGET')}
                   </div>
                 </div>
 
@@ -1549,7 +1571,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                       isLockedOn ? 'border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/60' : 'border-cyan-400 text-cyan-300'
                     }`}>
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                      <span>{isLockedOn ? '☝️ ПАЛЕЦ В ЦЕЛИ!' : '☝️ КОНЧИК ПАЛЬЦА'}</span>
+                      <span>{isLockedOn ? (language === 'ru' ? '☝️ ПАЛЕЦ В ЦЕЛИ!' : '☝️ FINGER ON TARGET!') : (language === 'ru' ? '☝️ КОНЧИК ПАЛЬЦА' : '☝️ FINGERTIP APEX')}</span>
                     </div>
                   </div>
                 )}
@@ -1559,12 +1581,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Arena Footer Info */}
               <div className="flex justify-between items-center text-[8px] sm:text-[9px] font-mono text-zinc-400 pt-1">
                 <div>
-                  <span>💡 <strong className="text-white">Совет:</strong> направьте указательный палец в камеру и ведите его за рыбой.</span>
+                  <span>💡 <strong className="text-white">{language === 'ru' ? 'Совет:' : 'Tip:'}</strong> {language === 'ru' ? 'направьте указательный палец в камеру и ведите его за рыбой.' : 'aim your index finger at the camera and track the fish.'}</span>
                 </div>
                 <div className={`px-2 py-0.5 font-arcade ${
                   isLockedOn ? 'text-emerald-400' : 'text-amber-400'
                 }`}>
-                  {isLockedOn ? '● СВЯЗЬ АКТИВНА' : '○ ПОИСК ЦЕЛИ'}
+                  {isLockedOn ? (language === 'ru' ? '● СВЯЗЬ АКТИВНА' : '● SIGNAL ACTIVE') : (language === 'ru' ? '○ ПОИСК ЦЕЛИ' : '○ SEEKING TARGET')}
                 </div>
               </div>
 
@@ -1576,19 +1598,23 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {/* LOST Fish Alert */}
         {stage === 'LOST' && (
           <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-3 pixel-corners animate-shake shadow-[0_0_40px_rgba(239,68,68,0.6)] max-w-md w-full">
-            <div className="text-lg">РЫБА СОРВАЛАСЬ!</div>
+            <div className="text-lg">{t('fishing.lostTitle')}</div>
             <div className="text-xs text-zinc-300 font-mono">
-              {lostReason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!'}
+              {lostReason || (language === 'ru' ? 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!' : 'Line snapped. Keep your finger accurately over the fish next time!')}
             </div>
             {consecutiveFails >= 2 && (
               <div className="p-2.5 bg-black/80 border border-amber-400 text-[9px] text-amber-200 font-mono text-left space-y-1">
                 <div className="font-arcade text-[10px] text-amber-300 flex items-center gap-1.5">
                   <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                  <span>ПОДСКАЗКА (НЕ УДАЛОСЬ ВЫЛОВИТЬ {consecutiveFails} РАЗА):</span>
+                  <span>
+                    {language === 'ru' 
+                      ? `ПОДСКАЗКА (НЕ УДАЛОСЬ ВЫЛОВИТЬ ${consecutiveFails} РАЗА):` 
+                      : `HINT (FAILED TO CATCH ${consecutiveFails} TIMES):`}
+                  </span>
                 </div>
-                <div>• Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальстарт).</div>
-                <div>• При поклевке резко двиньте палец в камеру за 0.75с.</div>
-                <div>• В вываживании держите бирюзовый прицел ☝️ на рыбе.</div>
+                <div>• {language === 'ru' ? 'Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальстарт).' : 'Do not move hand before «FISH ON!» (or false start).'}</div>
+                <div>• {language === 'ru' ? 'При поклевке резко двиньте палец в камеру за 0.75с.' : 'When bite occurs, rapidly thrust finger towards camera within 0.75s.'}</div>
+                <div>• {language === 'ru' ? 'В вываживании держите бирюзовый прицел ☝️ на рыбе.' : 'During reeling, keep the cyan reticle ☝️ over the fish.'}</div>
               </div>
             )}
           </div>
@@ -1600,14 +1626,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             
             <div className="font-arcade text-xs text-amber-400 tracking-wider flex items-center justify-center gap-2">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>ТРОФЕЙ ВЫЛОВЛЕН!</span>
+              <span>{t('fishing.successTitle')}</span>
             </div>
 
             {/* Rare SHINY Badge if rolled */}
             {lastCaught.isShiny && (
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-amber-500/30 via-yellow-400/30 to-amber-500/30 border-2 border-amber-300 font-arcade text-[10px] text-amber-200 shadow-[0_0_20px_rgba(251,191,36,0.6)] animate-pulse">
                 <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-                <span>✨ РЕДКАЯ МУТАЦИЯ: SHINY (+100% К ЦЕНЕ!) ✨</span>
+                <span>{language === 'ru' ? '✨ РЕДКАЯ МУТАЦИЯ: SHINY (+100% К ЦЕНЕ!) ✨' : '✨ RARE MUTATION: SHINY (+100% VALUE!) ✨'}</span>
               </div>
             )}
 
@@ -1619,11 +1645,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             }`}>
               <img
                 src={lastCaught.fish.cardImage}
-                alt={lastCaught.fish.name}
+                alt={getFishName(lastCaught.fish, language)}
                 className="w-full h-full object-cover"
               />
               <div className="absolute bottom-2 right-2 bg-black/80 border border-zinc-800 px-2 py-0.5 font-arcade text-[9px]">
-                <span className="text-cyan-300 font-mono">ШАНС: {lastCaught.fish.catchChance}%</span>
+                <span className="text-cyan-300 font-mono">{language === 'ru' ? 'ШАНС' : 'CHANCE'}: {lastCaught.fish.catchChance}%</span>
               </div>
             </div>
 
@@ -1631,16 +1657,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div className="flex items-center justify-center gap-1.5">
                 {lastCaught.isShiny && <Sparkles className="w-4 h-4 text-amber-300" />}
                 <h3 className={`font-arcade text-sm ${lastCaught.isShiny ? 'text-amber-200 font-bold' : 'text-white'}`}>
-                  {lastCaught.fish.name} {lastCaught.isShiny ? '[SHINY]' : ''}
+                  {getFishName(lastCaught.fish, language)} {lastCaught.isShiny ? '[SHINY]' : ''}
                 </h3>
               </div>
               <p className="font-mono text-xs text-zinc-300 mt-1">
-                Вес: <span className="text-emerald-400 font-bold">{lastCaught.weight} кг</span> · Ценность: <span className="text-amber-400 font-bold">{lastCaught.price.toLocaleString()} C</span>
+                {t('fishing.weight')}: <span className="text-emerald-400 font-bold">{lastCaught.weight} {t('bestiary.kg')}</span> · {t('fishing.price')}: <span className="text-amber-400 font-bold">+{lastCaught.price.toLocaleString()} C</span>
               </p>
               {lastCaught.expEarned && (
                 <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-950/80 border border-cyan-400 font-arcade text-[9px] text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.35)]">
                   <Sparkles className="w-3 h-3 text-cyan-300" />
-                  <span>+{lastCaught.expEarned} EXP ОПЫТА</span>
+                  <span>+{lastCaught.expEarned} {t('fishing.exp')}</span>
                 </div>
               )}
             </div>
@@ -1648,11 +1674,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             {/* Guest notice or Registered Sadok notification */}
             {profile.isRegistered ? (
               <div className="p-2 bg-emerald-950/60 border border-emerald-500/50 text-[10px] text-emerald-300 font-mono text-center">
-                ✓ 1 экземпляр добавлен в садок! Продать его можно во вкладке «ПРОФИЛЬ».
+                {language === 'ru' ? '✓ 1 экземпляр добавлен в садок! Продать его можно во вкладке «ПРОФИЛЬ».' : '✓ 1 fish added to basket! Sell it in «PROFILE» tab.'}
               </div>
             ) : (
               <div className="p-2.5 bg-amber-950/60 border border-amber-500/50 text-[10px] text-amber-300 font-mono leading-relaxed">
-                Вы играете как гость — улов и баланс не сохраняются. Зарегистрируйтесь, чтобы сохранять все виды рыб и счетчик поимок!
+                {language === 'ru' ? 'Вы играете как гость — улов и баланс не сохраняются. Зарегистрируйтесь, чтобы сохранять все виды рыб и счетчик поимок!' : 'Playing as guest — catches and wallet are not persisted. Register to save all fish species and records!'}
               </div>
             )}
 
@@ -1661,7 +1687,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 onClick={handleCast}
                 className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] transition-all cursor-pointer"
               >
-                [ ЕЩЕ ЗАБРОС ]
+                [ {language === 'ru' ? 'ЕЩЕ ЗАБРОС' : 'CAST AGAIN'} ]
               </button>
               
               {!profile.isRegistered && setTab && (
@@ -1670,7 +1696,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   className="py-3 px-3 bg-amber-500 hover:bg-amber-400 text-black font-arcade text-xs border border-amber-300 flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>СОХРАНИТЬ В ПРОФИЛЬ</span>
+                  <span>{t('fishing.saveToProfile')}</span>
                 </button>
               )}
 
@@ -1678,7 +1704,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 onClick={openBestiary}
                 className="py-3 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-arcade text-xs border border-zinc-600 cursor-pointer"
               >
-                КАТАЛОГ
+                {t('nav.bestiary')}
               </button>
             </div>
 
@@ -1694,13 +1720,13 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         <div className="flex flex-col gap-0.5 font-arcade text-[8px] sm:text-[9px] text-zinc-300">
           <div className="text-emerald-400 font-bold flex items-center gap-1.5">
             <Camera className="w-3.5 h-3.5 text-emerald-400" />
-            <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
+            <span>{language === 'ru' ? 'ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:' : 'OPTICAL GESTURE CONTROLS:'}</span>
           </div>
-          <div><span className="text-cyan-400">[ЗАБРОС]</span> Жест «Лайк» (👍) в камеру (0.3с) или кнопка мышью</div>
-          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру (окно 0.75 сек)</div>
-          <div><span className="text-red-400">[ОШИБКА]</span> Рывок раньше поклевки = фальстарт (штраф 2 сек)</div>
-          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
-          <div><span className="text-rose-400">[ПРИЕМ]</span> Быстро подтвердите улов (окно ровно 1.0 сек, иначе срыв!)</div>
+          <div>{t('fishing.hudCast')}</div>
+          <div>{t('fishing.hudStrike')}</div>
+          <div>{t('fishing.hudFoul')}</div>
+          <div>{t('fishing.hudReel')}</div>
+          <div>{t('fishing.hudAccept')}</div>
         </div>
 
         {/* Right: Persistent Live Camera Viewfinder Window */}
@@ -1709,7 +1735,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <div className="flex items-center justify-between text-[7px] font-arcade text-zinc-300 mb-1 px-1">
               <div className="flex items-center gap-1 text-emerald-300">
                 <div className={`w-1.5 h-1.5 rounded-full ${cameraStatus === 'ACTIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                <span>ВЕБ-КАМЕРА</span>
+                <span>{t('fishing.webcamTitle')}</span>
               </div>
               <div className={
                 isThumbsUp 
@@ -1721,14 +1747,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   : 'text-amber-400'
               }>
                 {isThumbsUp 
-                  ? '👍 ЛАЙК' 
+                  ? t('fishing.webcamThumbsUp')
                   : isWrongGesture 
-                  ? '⚠️ НЕ ЛАЙК' 
+                  ? t('fishing.webcamWrong')
                   : cameraStatus === 'ACTIVE' 
-                  ? '60 FPS' 
+                  ? t('fishing.webcamActive')
                   : cameraStatus === 'CONNECTING' 
-                  ? 'ЗАПУСК...' 
-                  : 'ОТКЛ'}
+                  ? t('fishing.webcamConnecting')
+                  : t('fishing.webcamOff')}
               </div>
             </div>
 
@@ -1745,12 +1771,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {isThumbsUp ? (
                 <div className="absolute top-1 left-1 bg-emerald-950/90 border border-emerald-400 px-1.5 py-0.5 rounded font-arcade text-[8px] text-emerald-300 animate-pulse shadow-[0_0_10px_#10b981] z-20 flex items-center gap-1">
                   <span>👍</span>
-                  <span>ЛАЙК</span>
+                  <span>{language === 'ru' ? 'ЛАЙК' : 'LIKE'}</span>
                 </div>
               ) : isWrongGesture ? (
                 <div className="absolute top-1 left-1 bg-amber-950/90 border border-amber-400 px-1.5 py-0.5 rounded font-arcade text-[7px] text-amber-300 animate-pulse shadow-[0_0_10px_#f59e0b] z-20 flex items-center gap-1">
                   <span>⚠️</span>
-                  <span>НЕ ТОТ ЖЕСТ</span>
+                  <span>{t('fishing.webcamWrongBadge')}</span>
                 </div>
               ) : null}
 

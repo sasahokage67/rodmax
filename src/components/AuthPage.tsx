@@ -4,6 +4,8 @@ import { FISH_DATABASE } from '../data/fishDatabase';
 import { getLevelInfo } from '../utils/levelUtils';
 import { sound } from '../audio';
 import { registerUser, loginUser } from '../utils/authUtils';
+import { useLanguage } from '../i18n/LanguageContext';
+import { getFishName, getRarityName, getAvatarName, getAvatarRole } from '../i18n/translations';
 import { 
   Shield, 
   CheckCircle2, 
@@ -126,6 +128,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   setTab,
   onSellFish 
 }) => {
+  const { t, language } = useLanguage();
   // Avatar modal state
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   // Auth mode: 'REGISTER' | 'LOGIN'
@@ -145,7 +148,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     const validPattern = /^[a-zA-Z0-9._]*$/;
 
     if (!validPattern.test(val)) {
-      setInputError('РАЗРЕШЕНЫ ТОЛЬКО АНГЛИЙСКИЕ БУКВЫ, ЦИФРЫ, ТОЧКИ И ПОДЧЕРКИВАНИЯ (_)');
+      setInputError(t('auth.errEngOnly'));
       return;
     }
 
@@ -156,22 +159,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!callsign.trim()) {
-      setInputError('ВВЕДИТЕ ПОЗЫВНОЙ (НИКНЕЙМ)');
+      setInputError(t('auth.errCallsignEmpty'));
       return;
     }
     if (callsign.length < 3) {
-      setInputError('НИКНЕЙМ ДОЛЖЕН БЫТЬ НЕ МЕНЕЕ 3 СИМВОЛОВ');
+      setInputError(t('auth.errCallsignShort'));
       return;
     }
     if (password.length < 8) {
-      setInputError(`ПАРОЛЬ ДОЛЖЕН СОДЕРЖАТЬ НЕ МЕНЕЕ 8 СИМВОЛОВ (СЕЙЧАС: ${password.length})`);
+      setInputError(t('auth.errPassShort', { count: password.length }));
       return;
     }
 
     if (authMode === 'REGISTER') {
       const res = registerUser(callsign, password, profile);
       if (!res.success) {
-        setInputError(res.error || 'ОШИБКА РЕГИСТРАЦИИ');
+        setInputError(res.error || t('auth.errRegister'));
         return;
       }
       sound.playCoin();
@@ -183,7 +186,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     } else {
       const res = loginUser(callsign, password);
       if (!res.success) {
-        setInputError(res.error || 'ОШИБКА ВХОДА');
+        setInputError(res.error || t('auth.errLogin'));
         return;
       }
       sound.playCoin();
@@ -296,11 +299,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   // Rank determination
   const rankTitle = useMemo(() => {
     const lvl = levelInfo.level;
-    if (lvl >= 20) return 'ВЛАДЫКА БЕЗДНЫ';
-    if (lvl >= 10) return 'МАСТЕР ОКЕАНА';
-    if (lvl >= 5) return 'ОПЫТНЫЙ РЫБОЛОВ';
-    return 'НАЧИНАЮЩИЙ ЛОВЕЦ';
-  }, [levelInfo.level]);
+    if (lvl >= 20) return t('auth.rankAbyss');
+    if (lvl >= 10) return t('auth.rankOcean');
+    if (lvl >= 5) return t('auth.rankVeteran');
+    return t('auth.rankNovice');
+  }, [levelInfo.level, t]);
 
   // -------------------------------------------------------------
   // VIEW 1: REGISTRATION FORM (When NOT Registered)
@@ -329,7 +332,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               }`}
             >
               <UserPlus className="w-3.5 h-3.5" />
-              <span>СОЗДАТЬ АККАУНТ</span>
+              <span>{t('auth.tabCreate')}</span>
             </button>
 
             <button
@@ -342,7 +345,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               }`}
             >
               <LogIn className="w-3.5 h-3.5" />
-              <span>ВОЙТИ В СУЩЕСТВУЮЩИЙ</span>
+              <span>{t('auth.tabLogin')}</span>
             </button>
           </div>
 
@@ -351,17 +354,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="w-3 h-3 bg-emerald-400 animate-pulse" />
               <div>
                 <h1 className="font-arcade text-emerald-400 text-sm sm:text-base tracking-wider">
-                  {authMode === 'REGISTER' ? 'РЕГИСТРАЦИЯ АККАУНТА' : 'ВХОД В ЛИЧНЫЙ КАБИНЕТ'}
+                  {authMode === 'REGISTER' ? t('auth.titleRegister') : t('auth.titleLogin')}
                 </h1>
                 <p className="font-arcade text-[8px] text-emerald-600 mt-1">
                   {authMode === 'REGISTER' 
-                    ? 'СОЗДАЙ ПРОФИЛЬ ДЛЯ СОХРАНЕНИЯ УЛОВА И ИНВЕНТАРЯ' 
-                    : 'ВВЕДИ СВОИ ДАННЫЕ ДЛЯ ЗАГРУЗКИ САДКА И БАЛАНСА'}
+                    ? t('auth.subtitleRegister') 
+                    : t('auth.subtitleLogin')}
                 </p>
               </div>
             </div>
             <div className="px-2.5 py-1 bg-amber-950 border border-amber-500/60 font-arcade text-[9px] text-amber-300">
-              ГОСТЕВОЙ РЕЖИМ
+              {t('auth.guestBadge')}
             </div>
           </div>
 
@@ -369,11 +372,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               <strong className="font-arcade text-[9px] text-amber-400 block mb-1">
-                {authMode === 'REGISTER' ? 'ПРЕИМУЩЕСТВА РЕГИСТРАЦИИ:' : 'ДОСТУП К ПРОФИЛЮ:'}
+                {authMode === 'REGISTER' ? t('auth.benefitsTitle') : t('auth.accessTitle')}
               </strong>
               {authMode === 'REGISTER' 
-                ? 'Только у зарегистрированных рыболовов работает Личный кабинет и постоянный Инвентарь, где подсчитывается каждый выловленный экземпляр, накапливаются монеты и ведутся рекорды!' 
-                : 'Войдите под своим позывным и паролем (от 8 символов), чтобы восстановить весь ваш пойманный улов, уровень и баланс монет.'}
+                ? t('auth.benefitsDesc') 
+                : t('auth.accessDesc')}
             </div>
           </div>
 
@@ -389,9 +392,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="flex justify-between items-center mb-1.5">
                 <label className="font-arcade text-[10px] text-emerald-300 flex items-center gap-1.5">
                   <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  ПОЗЫВНОЙ (НИКНЕЙМ В ИГРЕ)
+                  {t('auth.callsignLabel')}
                 </label>
-                <span className="font-mono text-[10px] text-zinc-400">ENG ONLY: A-Z, 0-9, ., _</span>
+                <span className="font-mono text-[10px] text-zinc-400">{t('auth.callsignHint')}</span>
               </div>
               <div className="relative">
                 <input
@@ -412,10 +415,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="flex justify-between items-center mb-1.5">
                 <label className="font-arcade text-[10px] text-emerald-300 flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                  ПАРОЛЬ ДОСТУПА
+                  {t('auth.passwordLabel')}
                 </label>
                 <span className={`font-mono text-[10px] ${password.length >= 8 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {password.length >= 8 ? '✓ МИНИМУМ 8 СИМВОЛОВ ВЫПОЛНЕН' : `${password.length}/8 МИН. СИМВОЛОВ`}
+                  {password.length >= 8 ? t('auth.passMinSuccess') : t('auth.passMinReq', { count: password.length })}
                 </span>
               </div>
               <div className="relative">
@@ -426,11 +429,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     setPassword(e.target.value);
                     if (inputError) setInputError(null);
                   }}
-                  placeholder="Минимум 8 символов (например, 12345678)"
+                  placeholder={t('auth.passPlaceholder')}
                   className="w-full bg-[#040906] border-2 border-emerald-500/60 focus:border-emerald-400 focus:outline-none px-4 py-2.5 font-mono text-xs text-emerald-100 placeholder:text-zinc-600 shadow-inner"
                 />
                 <div className="absolute right-3 top-2.5 font-mono text-[10px] text-zinc-500">
-                  [≥ 8 СИМВ]
+                  {t('auth.passBadge')}
                 </div>
               </div>
             </div>
@@ -443,12 +446,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 {authMode === 'REGISTER' ? (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>СОЗДАТЬ АККАУНТ И ОТКРЫТЬ КАБИНЕТ</span>
+                    <span>{t('auth.submitRegister')}</span>
                   </>
                 ) : (
                   <>
                     <LogIn className="w-4 h-4" />
-                    <span>ВОЙТИ В СВОЙ АККАУНТ</span>
+                    <span>{t('auth.submitLogin')}</span>
                   </>
                 )}
               </button>
@@ -459,7 +462,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 className="py-3 px-5 bg-zinc-900 hover:bg-zinc-800 text-amber-300 hover:text-white font-arcade text-[9px] tracking-wider border border-zinc-700 flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Play className="w-3.5 h-3.5 text-amber-400" />
-                <span>ИГРАТЬ БЕЗ РЕГИСТРАЦИИ</span>
+                <span>{t('auth.playGuest')}</span>
               </button>
             </div>
 
@@ -467,7 +470,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="pt-2 text-center border-t border-emerald-500/20">
               {authMode === 'REGISTER' ? (
                 <div className="font-mono text-xs text-zinc-400">
-                  Уже есть созданный аккаунт?{' '}
+                  {t('auth.haveAccount')}{' '}
                   <button
                     type="button"
                     onClick={() => {
@@ -477,12 +480,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     }}
                     className="text-emerald-400 hover:text-emerald-300 underline font-arcade text-[10px] ml-1"
                   >
-                    Войти в существующий
+                    {t('auth.loginLink')}
                   </button>
                 </div>
               ) : (
                 <div className="font-mono text-xs text-zinc-400">
-                  Впервые на RODMAX?{' '}
+                  {t('auth.newHere')}{' '}
                   <button
                     type="button"
                     onClick={() => {
@@ -492,7 +495,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     }}
                     className="text-emerald-400 hover:text-emerald-300 underline font-arcade text-[10px] ml-1"
                   >
-                    Зарегистрировать новый профиль
+                    {t('auth.registerLink')}
                   </button>
                 </div>
               )}
@@ -530,7 +533,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div 
                 onClick={() => setIsAvatarModalOpen(true)}
                 className="relative group cursor-pointer flex-shrink-0"
-                title="Нажмите, чтобы сменить аватар"
+                title={t('auth.changeAvatarTip')}
               >
                 <div className="w-16 h-16 sm:w-20 sm:h-20 bg-black border-2 border-emerald-400 overflow-hidden shadow-[0_0_20px_rgba(16,185,129,0.35)] relative pixel-corners">
                   <img
@@ -540,7 +543,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   />
                   <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-[8px] font-arcade text-emerald-300 text-center p-1">
                     <Camera className="w-4 h-4 mb-0.5 text-emerald-400" />
-                    <span>СМЕНИТЬ</span>
+                    <span>{t('auth.changeAvatar')}</span>
                   </div>
                 </div>
 
@@ -548,7 +551,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setIsAvatarModalOpen(true); }}
                   className="absolute -bottom-1.5 -right-1.5 p-1 bg-zinc-900 border border-emerald-400 text-emerald-400 hover:bg-emerald-500 hover:text-black transition-colors shadow-md"
-                  title="Выбрать аватар"
+                  title={t('auth.chooseAvatar')}
                 >
                   <Edit3 className="w-3 h-3" />
                 </button>
@@ -561,7 +564,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     {profile.callsign}
                   </h1>
                   <span className="px-2 py-0.5 bg-emerald-500 text-black font-arcade text-[10px] font-bold shadow-[0_0_10px_rgba(16,185,129,0.4)]">
-                    УРОВЕНЬ {levelInfo.level}
+                    {t('auth.levelBadge', { lvl: levelInfo.level })}
                   </span>
                   <div className="font-arcade text-[10px] text-amber-400 tracking-widest flex items-center gap-1.5 ml-auto sm:ml-0">
                     <Trophy className="w-3.5 h-3.5 text-amber-400" />
@@ -574,7 +577,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <div className="flex justify-between items-center font-arcade text-[8px] text-zinc-400">
                     <span className="text-cyan-400 flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-cyan-400" />
-                      ПРОГРЕСС ОПЫТА (EXP)
+                      {t('auth.expProgress')}
                     </span>
                     <span className="text-emerald-300 font-mono text-[10px]">
                       {levelInfo.expIntoCurrentLevel} / {levelInfo.expRequiredForNext} EXP ({levelInfo.progressPercent}%)
@@ -592,11 +595,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   </div>
 
                   <div className="flex justify-between items-center text-[7px] font-arcade text-zinc-500">
-                    <span>УР. {levelInfo.level}</span>
+                    <span>{t('auth.lvlShort', { lvl: levelInfo.level })}</span>
                     <span className="text-cyan-400">
-                      ДО СЛЕДУЮЩЕГО УРОВНЯ: {levelInfo.expRequiredForNext - levelInfo.expIntoCurrentLevel} EXP
+                      {t('auth.toNextLevel', { exp: levelInfo.expRequiredForNext - levelInfo.expIntoCurrentLevel })}
                     </span>
-                    <span>УР. {levelInfo.level + 1}</span>
+                    <span>{t('auth.lvlShort', { lvl: levelInfo.level + 1 })}</span>
                   </div>
                 </div>
               </div>
@@ -609,16 +612,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 className="flex-1 md:flex-initial py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 flex items-center justify-center gap-2 shadow-[0_3px_0_#064e3b]"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
-                <span>НА РЫБАЛКУ</span>
+                <span>{t('auth.btnFishing')}</span>
               </button>
 
               <button
                 onClick={handleLogout}
                 className="py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-red-400 font-arcade text-[10px] border border-zinc-700 flex items-center gap-1.5 transition-colors"
-                title="Сменить профиль"
+                title={t('auth.switchProfile')}
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">ВЫЙТИ</span>
+                <span className="hidden sm:inline">{t('auth.btnLogout')}</span>
               </button>
             </div>
 
@@ -631,7 +634,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="p-4 bg-black/60 border border-emerald-500/40 space-y-1">
               <div className="flex items-center gap-1.5 font-arcade text-[9px] text-zinc-400">
                 <Coins className="w-3.5 h-3.5 text-amber-400" />
-                <span>БАЛАНС МОНЕТ</span>
+                <span>{t('auth.metricCoins')}</span>
               </div>
               <div className="font-arcade text-lg sm:text-xl text-amber-400">
                 {profile.coins.toLocaleString()} C
@@ -642,10 +645,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="p-4 bg-black/60 border border-emerald-500/40 space-y-1">
               <div className="flex items-center gap-1.5 font-arcade text-[9px] text-zinc-400">
                 <Trophy className="w-3.5 h-3.5 text-emerald-400" />
-                <span>ВСЕГО ВЫЛОВЛЕНО</span>
+                <span>{t('auth.metricCatches')}</span>
               </div>
               <div className="font-arcade text-lg sm:text-xl text-emerald-300">
-                {totalLifetimeCatches} ШТ
+                {totalLifetimeCatches} {t('auth.unitsPcs')}
               </div>
             </div>
 
@@ -653,10 +656,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="p-4 bg-black/60 border border-emerald-500/40 space-y-1">
               <div className="flex items-center gap-1.5 font-arcade text-[9px] text-zinc-400">
                 <Fish className="w-3.5 h-3.5 text-cyan-400" />
-                <span>В САДКЕ СЕЙЧАС</span>
+                <span>{t('auth.metricBasket')}</span>
               </div>
               <div className="font-arcade text-lg sm:text-xl text-cyan-300">
-                {profile.inventory.length} ШТ <span className="text-xs text-zinc-500">({totalWeight} кг)</span>
+                {profile.inventory.length} {t('auth.unitsPcs')} <span className="text-xs text-zinc-500">({totalWeight} {t('auth.unitsKg')})</span>
               </div>
             </div>
 
@@ -664,7 +667,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="p-4 bg-black/60 border border-emerald-500/40 space-y-1">
               <div className="flex items-center gap-1.5 font-arcade text-[9px] text-zinc-400">
                 <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                <span>ЦЕННОСТЬ САДКА</span>
+                <span>{t('auth.metricBasketVal')}</span>
               </div>
               <div className="font-arcade text-lg sm:text-xl text-emerald-400">
                 {totalInventoryValue.toLocaleString()} C
@@ -683,13 +686,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-emerald-500/30">
             <div>
               <h2 className="font-arcade text-lg sm:text-xl text-emerald-400 tracking-wider flex items-center gap-2">
-                <span>ИНВЕНТАРЬ И УЧЕТ ТРОФЕЕВ</span>
+                <span>{t('auth.invTitle')}</span>
                 <span className="text-xs text-zinc-400 font-mono">
-                  (Открыто видов: {caughtSpeciesCount} из {FISH_DATABASE.length})
+                  {t('auth.invSpeciesCount', { caught: caughtSpeciesCount, total: FISH_DATABASE.length })}
                 </span>
               </h2>
               <p className="font-arcade text-[9px] text-zinc-400 mt-1">
-                ЗДЕСЬ УЧТЕН КАЖДЫЙ ВЫЛОВЛЕННЫЙ ВИД, СЧЕТЧИК ПОИМОК И ЖИВОЙ САДОК
+                {t('auth.invSub')}
               </p>
             </div>
 
@@ -700,7 +703,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 className="py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-black font-arcade text-xs border border-amber-300 flex items-center gap-2 shadow-[0_3px_0_#78350f] transition-all self-start md:self-auto"
               >
                 <Coins className="w-4 h-4" />
-                <span>ПРОДАТЬ ВЕСЬ САДОК (+{totalInventoryValue.toLocaleString()} C)</span>
+                <span>{t('auth.sellAllBasket', { val: totalInventoryValue.toLocaleString() })}</span>
               </button>
             )}
           </div>
@@ -710,7 +713,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             
             {/* View Mode Switcher */}
             <div className="flex flex-wrap items-center gap-2 font-arcade text-[9px]">
-              <span className="text-zinc-500 mr-1">РЕЖИМ:</span>
+              <span className="text-zinc-500 mr-1">{t('auth.modeLabel')}</span>
               <button
                 onClick={() => { sound.playReelClick(); setViewMode('IN_BASKET'); }}
                 className={`px-3 py-1.5 border transition-all flex items-center gap-1.5 ${
@@ -719,7 +722,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
-                <span>В САДКЕ ({profile.inventory.length} ШТ)</span>
+                <span>{t('auth.modeInBasket', { count: profile.inventory.length })}</span>
                 {shinyCountInBasket > 0 && (
                   <span className="px-1 py-0.2 bg-amber-400 text-black text-[7px] font-bold">
                     ✨{shinyCountInBasket} SHINY
@@ -735,7 +738,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
-                БЕСТИАРИЙ ({caughtSpeciesCount})
+                {t('auth.modeBestiary', { count: caughtSpeciesCount })}
               </button>
 
               <button
@@ -746,7 +749,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
-                ВЕСЬ ОКЕАН ({FISH_DATABASE.length})
+                {t('auth.modeFull', { count: FISH_DATABASE.length })}
               </button>
             </div>
 
@@ -762,7 +765,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       : 'bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-white'
                   }`}
                 >
-                  {r === 'ALL' ? 'ВСЕ' : r}
+                  {r === 'ALL' ? t('auth.filterAll') : getRarityName(r as any, language)}
                 </button>
               ))}
             </div>
@@ -775,26 +778,26 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="p-12 text-center bg-[#07130e]/80 border-2 border-dashed border-emerald-500/40 pixel-corners space-y-4">
                 <div className="text-4xl">🐟</div>
                 <h3 className="font-arcade text-sm text-emerald-300">
-                  {selectedRarity !== 'ALL' ? 'НЕТ РЫБ ВЫБРАННОЙ РЕДКОСТИ В САДКЕ!' : 'САДОК СЕЙЧАС ПУСТ!'}
+                  {selectedRarity !== 'ALL' ? t('auth.emptyBasketRarity') : t('auth.emptyBasket')}
                 </h3>
                 <p className="font-mono text-xs text-zinc-400 max-w-md mx-auto">
                   {selectedRarity !== 'ALL'
-                    ? 'Попробуйте сбросить фильтр редкости на «ВСЕ», чтобы увидеть весь улов.'
-                    : 'Все пойманные рыбы уже проданы, либо вы еще не выловили свежий улов. Отправляйтесь на рыбалку или посмотрите Бестиарий!'}
+                    ? t('auth.emptyBasketRarityDesc')
+                    : t('auth.emptyBasketDesc')}
                 </p>
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={() => { sound.playReelClick(); setViewMode('ALL_CAUGHT'); }}
                     className="py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 text-white font-arcade text-xs border border-zinc-600"
                   >
-                    ОТКРЫТЬ БЕСТИАРИЙ
+                    {t('auth.openBestiary')}
                   </button>
                   <button
                     onClick={() => { sound.playCast(); setTab('fishing'); }}
                     className="py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] inline-flex items-center gap-2"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>НА РЫБАЛКУ</span>
+                    <span>{t('auth.btnFishing')}</span>
                   </button>
                 </div>
               </div>
@@ -802,6 +805,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {displayedInventory.map((item, index) => {
                   const isShiny = !!item.isShiny;
+                  const fishDisplayName = getFishName(item.fish, language);
                   return (
                     <div
                       key={item.id || `${item.fish.id}_${item.weight}_${index}`}
@@ -815,7 +819,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
                         <img
                           src={item.fish.cardImage}
-                          alt={item.fish.name}
+                          alt={fishDisplayName}
                           className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                         />
 
@@ -823,20 +827,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         {isShiny && (
                           <div className="absolute top-2 left-2 z-10 px-2 py-0.5 bg-amber-950/95 border border-amber-300 font-arcade text-[8px] text-amber-300 flex items-center gap-1 shadow-[0_0_10px_rgba(251,191,36,0.6)] animate-pulse">
                             <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
-                            <span>SHINY [2X ЦЕНА]</span>
+                            <span>SHINY [2X]</span>
                           </div>
                         )}
 
                         {/* Weight Badge */}
                         <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
-                          {item.weight} КГ
+                          {item.weight} {language === 'ru' ? 'КГ' : 'KG'}
                         </div>
                       </div>
 
                       {/* Fish Info */}
                       <div>
                         <div className="flex items-center justify-between gap-1">
-                          <h4 className="font-arcade text-xs text-white truncate">{item.fish.name}</h4>
+                          <h4 className="font-arcade text-xs text-white truncate">{fishDisplayName}</h4>
                           {isShiny && (
                             <span className="text-[8px] font-arcade text-amber-400 flex-shrink-0 animate-pulse">
                               ✨ SHINY
@@ -846,12 +850,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         
                         <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
                           <div className="flex justify-between">
-                            <span>Вес особи:</span>
-                            <span className="text-emerald-400 font-bold">{item.weight} кг</span>
+                            <span>{t('auth.weightLabel')}</span>
+                            <span className="text-emerald-400 font-bold">{item.weight} {t('auth.unitsKg')}</span>
                           </div>
                           
                           <div className="flex justify-between items-center">
-                            <span>Стоимость продажи:</span>
+                            <span>{t('auth.sellPriceLabel')}</span>
                             <span className={`font-bold flex items-center gap-1 ${isShiny ? 'text-amber-400 font-arcade text-xs' : 'text-emerald-400'}`}>
                               +{item.price.toLocaleString()} C
                               {isShiny && <span className="text-[8px] text-amber-300 bg-amber-950 px-1 border border-amber-500/50">2X</span>}
@@ -860,7 +864,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                           {item.caughtAt && (
                             <div className="flex justify-between text-[9px] text-zinc-500">
-                              <span>Выловлена:</span>
+                              <span>{t('auth.caughtAtLabel')}</span>
                               <span>{item.caughtAt}</span>
                             </div>
                           )}
@@ -878,7 +882,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           }`}
                         >
                           <Coins className="w-3.5 h-3.5" />
-                          <span>ПРОДАТЬ (+{item.price.toLocaleString()} C)</span>
+                          <span>{t('auth.sellBtn', { val: item.price.toLocaleString() })}</span>
                         </button>
                       )}
                     </div>
@@ -892,10 +896,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="p-12 text-center bg-[#07130e]/80 border-2 border-dashed border-emerald-500/40 pixel-corners space-y-4">
                 <div className="text-4xl">🐟</div>
                 <h3 className="font-arcade text-sm text-emerald-300">
-                  НЕТ РЫБ В ВЫБРАННОЙ КАТЕГОРИИ БЕСТИАРИЯ!
+                  {t('auth.emptyCategory')}
                 </h3>
                 <p className="font-mono text-xs text-zinc-400 max-w-md mx-auto">
-                  Попробуйте сбросить фильтр редкости или отправляйтесь на глубоководный заброс!
+                  {t('auth.emptyCategoryDesc')}
                 </p>
                 <div className="flex justify-center gap-3">
                   <button
@@ -903,77 +907,80 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     className="py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] inline-flex items-center gap-2"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>НА РЫБАЛКУ</span>
+                    <span>{t('auth.btnFishing')}</span>
                   </button>
                 </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {displayedFish.map(({ fish, basketCount, basketValue, lifetimeCount, recordWeight, hasCaughtEver }) => (
-                  <div
-                    key={fish.id}
-                    className={`bg-[#07130e] border-2 p-3 pixel-corners space-y-3 shadow-md transition-all ${
-                      hasCaughtEver 
-                        ? 'border-emerald-500/60 hover:border-emerald-400' 
-                        : 'border-zinc-800 opacity-60'
-                    }`}
-                  >
-                    {/* Card Image with Count Badge */}
-                    <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
-                      <img
-                        src={fish.cardImage}
-                        alt={fish.name}
-                        className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${
-                          !hasCaughtEver ? 'grayscale brightness-50' : ''
-                        }`}
-                      />
+                {displayedFish.map(({ fish, basketCount, basketValue, lifetimeCount, recordWeight, hasCaughtEver }) => {
+                  const fishDisplayName = getFishName(fish, language);
+                  return (
+                    <div
+                      key={fish.id}
+                      className={`bg-[#07130e] border-2 p-3 pixel-corners space-y-3 shadow-md transition-all ${
+                        hasCaughtEver 
+                          ? 'border-emerald-500/60 hover:border-emerald-400' 
+                          : 'border-zinc-800 opacity-60'
+                      }`}
+                    >
+                      {/* Card Image with Count Badge */}
+                      <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
+                        <img
+                          src={fish.cardImage}
+                          alt={fishDisplayName}
+                          className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${
+                            !hasCaughtEver ? 'grayscale brightness-50' : ''
+                          }`}
+                        />
 
-                      {/* How many times caught badge (xCount) */}
-                      <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
-                        {hasCaughtEver ? `ПОЙМАНО: x${lifetimeCount}` : 'НЕ ПОЙМАНО'}
-                      </div>
-                    </div>
-
-                    {/* Fish Info */}
-                    <div>
-                      <h4 className="font-arcade text-xs text-white truncate">{fish.name}</h4>
-                      <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
-                        <div className="flex justify-between">
-                          <span>Рекордный вес:</span>
-                          <span className="text-emerald-400 font-bold">
-                            {recordWeight > 0 ? `${recordWeight} кг` : '—'}
-                          </span>
-                        </div>
-                        
-                        <div className="flex justify-between">
-                          <span>В садке сейчас:</span>
-                          <span className={basketCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-600'}>
-                            {basketCount > 0 ? `${basketCount} шт (${basketValue.toLocaleString()} C)` : '0 шт'}
-                          </span>
+                        {/* How many times caught badge (xCount) */}
+                        <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
+                          {hasCaughtEver ? t('auth.caughtLifetime', { count: lifetimeCount }) : t('auth.notCaughtBadge')}
                         </div>
                       </div>
+
+                      {/* Fish Info */}
+                      <div>
+                        <h4 className="font-arcade text-xs text-white truncate">{fishDisplayName}</h4>
+                        <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
+                          <div className="flex justify-between">
+                            <span>{t('auth.recordWeight')}</span>
+                            <span className="text-emerald-400 font-bold">
+                              {recordWeight > 0 ? `${recordWeight} ${t('auth.unitsKg')}` : '—'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex justify-between">
+                            <span>{t('auth.inBasketNow')}</span>
+                            <span className={basketCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-600'}>
+                              {basketCount > 0 ? `${basketCount} ${t('auth.unitsPcs')} (${basketValue.toLocaleString()} C)` : `0 ${t('auth.unitsPcs')}`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Sell or Status Action */}
+                      {basketCount > 0 && onSellFish ? (
+                        <button
+                          onClick={() => { sound.playCoin(); onSellFish(fish.id); }}
+                          className="w-full py-2 bg-zinc-900 hover:bg-amber-500 hover:text-black text-amber-300 font-arcade text-[9px] border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <span>{t('auth.sellAllOfFish', { count: basketCount, val: basketValue.toLocaleString() })}</span>
+                        </button>
+                      ) : hasCaughtEver ? (
+                        <div className="w-full py-1.5 bg-zinc-950/80 border border-zinc-800 text-zinc-500 font-arcade text-[8px] text-center">
+                          {t('auth.statusDiscovered')}
+                        </div>
+                      ) : (
+                        <div className="w-full py-1.5 bg-black border border-zinc-900 text-zinc-600 font-arcade text-[8px] text-center">
+                          {t('auth.statusUndiscovered')}
+                        </div>
+                      )}
+
                     </div>
-
-                    {/* Sell or Status Action */}
-                    {basketCount > 0 && onSellFish ? (
-                      <button
-                        onClick={() => { sound.playCoin(); onSellFish(fish.id); }}
-                        className="w-full py-2 bg-zinc-900 hover:bg-amber-500 hover:text-black text-amber-300 font-arcade text-[9px] border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <span>ПРОДАТЬ ВСЕ {basketCount} ШТ (+{basketValue.toLocaleString()} C)</span>
-                      </button>
-                    ) : hasCaughtEver ? (
-                      <div className="w-full py-1.5 bg-zinc-950/80 border border-zinc-800 text-zinc-500 font-arcade text-[8px] text-center">
-                        ОТКРЫТО В БЕСТИАРИИ
-                      </div>
-                    ) : (
-                      <div className="w-full py-1.5 bg-black border border-zinc-900 text-zinc-600 font-arcade text-[8px] text-center">
-                        ВИД ЕЩЕ НЕ ВЫЛОВЛЕН
-                      </div>
-                    )}
-
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )
           )}
@@ -993,10 +1000,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 <Camera className="w-5 h-5 text-emerald-400" />
                 <div>
                   <h3 className="font-arcade text-sm text-emerald-300 tracking-wider">
-                    ВЫБОР АВАТАРА РЫБОЛОВА
+                    {t('auth.modalAvatarTitle')}
                   </h3>
                   <p className="font-mono text-[10px] text-zinc-400 mt-0.5">
-                    Выберите глубоководного персонажа или трофейную рыбу для своего профиля
+                    {t('auth.modalAvatarSub')}
                   </p>
                 </div>
               </div>
@@ -1013,6 +1020,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pt-1">
               {AVAILABLE_AVATARS.map((avatar) => {
                 const isSelected = (profile.avatar || '/assets/avatar_cyber_angler.jpg') === avatar.src;
+                const avatarName = getAvatarName(avatar.id, avatar.name, language);
+                const avatarRole = getAvatarRole(avatar.id, avatar.role, language);
+                const avatarRarity = getRarityName(avatar.rarity as any, language);
                 return (
                   <button
                     key={avatar.id}
@@ -1032,7 +1042,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     <div className="relative aspect-square w-full overflow-hidden border border-zinc-800 bg-black">
                       <img
                         src={avatar.src}
-                        alt={avatar.name}
+                        alt={avatarName}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                       />
                       {isSelected && (
@@ -1044,17 +1054,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/90 border font-arcade text-[7px]"
                         style={{ borderColor: avatar.color, color: avatar.color }}
                       >
-                        {avatar.rarity}
+                        {avatarRarity}
                       </div>
                     </div>
 
                     {/* Avatar Label */}
                     <div>
                       <div className="font-arcade text-[9px] text-white truncate group-hover:text-emerald-300">
-                        {avatar.name}
+                        {avatarName}
                       </div>
                       <div className="font-mono text-[8px] text-zinc-400 truncate mt-0.5">
-                        {avatar.role}
+                        {avatarRole}
                       </div>
                     </div>
                   </button>
@@ -1064,13 +1074,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
             {/* Footer notice */}
             <div className="pt-2 border-t border-emerald-500/30 flex justify-between items-center text-[9px] font-arcade text-zinc-400">
-              <span className="text-emerald-400">АКТИВНЫЙ АВАТАР СОХРАНЯЕТСЯ В ПРОФИЛЬ</span>
+              <span className="text-emerald-400">{t('auth.modalAvatarSaved')}</span>
               <button
                 type="button"
                 onClick={() => setIsAvatarModalOpen(false)}
                 className="py-1.5 px-4 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200"
               >
-                ЗАКРЫТЬ
+                {t('auth.modalClose')}
               </button>
             </div>
 
