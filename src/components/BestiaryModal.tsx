@@ -21,8 +21,16 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
 }) => {
   const { language, t } = useLanguage();
   const [selectedFish, setSelectedFish] = useState<FishItem>(initialSelected || FISH_DATABASE[0]);
+  const [videoError, setVideoError] = useState(false);
+  const [showVideo, setShowVideo] = useState(true);
 
   if (!isOpen) return null;
+
+  const handleFishSelect = (fish: FishItem) => {
+    sound.playReelClick();
+    setSelectedFish(fish);
+    setVideoError(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm select-none animate-in fade-in duration-150">
@@ -63,7 +71,7 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
               return (
                 <div
                   key={fish.id}
-                  onClick={() => { sound.playReelClick(); setSelectedFish(fish); }}
+                  onClick={() => handleFishSelect(fish)}
                   className={`p-2 border-2 cursor-pointer transition-all pixel-corners flex flex-col justify-between ${
                     isSelected 
                       ? 'bg-emerald-950/80 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
@@ -74,6 +82,8 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
                     <img
                       src={fish.cardImage}
                       alt={getFishName(fish, language)}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover transition-transform duration-200 hover:scale-105"
                     />
                     
@@ -109,27 +119,54 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
           <div className="md:col-span-6 bg-black/70 border-2 border-emerald-500/50 p-3 sm:p-4 space-y-3 sm:space-y-4 flex flex-col justify-between pixel-corners">
             
             <div className="space-y-3">
-              {/* Catch Video Showcase */}
+              {/* Catch Video / Card Showcase */}
               <div className="aspect-video bg-black overflow-hidden border border-emerald-500/40 relative">
-                {selectedFish.catchVideo ? (
+                {selectedFish.catchVideo && showVideo && !videoError ? (
                   <video
                     key={selectedFish.catchVideo}
-                    src={selectedFish.catchVideo}
+                    poster={selectedFish.cardImage}
+                    preload="metadata"
                     autoPlay
                     loop
                     muted
                     playsInline
+                    onError={() => setVideoError(true)}
                     className="w-full h-full object-cover"
-                  />
+                  >
+                    <source src={selectedFish.catchVideo.replace('.mp4', '.webm')} type="video/webm" />
+                    <source src={selectedFish.catchVideo} type="video/mp4" />
+                    <img
+                      src={selectedFish.cardImage}
+                      alt={getFishName(selectedFish, language)}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                  </video>
                 ) : (
                   <img
                     src={selectedFish.cardImage}
                     alt={getFishName(selectedFish, language)}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover"
                   />
                 )}
 
-                <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/90 border border-cyan-400 font-mono text-[9px] sm:text-[10px] text-cyan-300 font-bold">
+                {/* Display switch: Video / Card */}
+                {selectedFish.catchVideo && !videoError && (
+                  <button
+                    type="button"
+                    onClick={() => setShowVideo(!showVideo)}
+                    className="absolute top-2 right-2 px-2 py-0.5 bg-black/85 hover:bg-emerald-500 hover:text-black border border-emerald-400 font-arcade text-[8px] text-emerald-300 transition-colors z-20 shadow-md"
+                  >
+                    {showVideo 
+                      ? (language === 'ru' ? '🖼️ КАРТА' : '🖼️ CARD') 
+                      : (language === 'ru' ? '🎬 ВИДЕО' : '🎬 VIDEO')}
+                  </button>
+                )}
+
+                <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/90 border border-cyan-400 font-mono text-[9px] sm:text-[10px] text-cyan-300 font-bold z-10">
                   {t('bestiary.biteRate')}: {selectedFish.catchChance}%
                 </div>
               </div>

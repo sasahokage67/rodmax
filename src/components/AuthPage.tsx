@@ -539,6 +539,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <img
                     src={currentAvatar}
                     alt={profile.callsign}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                   />
                   <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-[8px] font-arcade text-emerald-300 text-center p-1">
@@ -820,6 +822,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         <img
                           src={item.fish.cardImage}
                           alt={fishDisplayName}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                         />
 
@@ -929,6 +933,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         <img
                           src={fish.cardImage}
                           alt={fishDisplayName}
+                          loading="lazy"
+                          decoding="async"
                           className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${
                             !hasCaughtEver ? 'grayscale brightness-50' : ''
                           }`}
@@ -1043,6 +1049,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       <img
                         src={avatar.src}
                         alt={avatarName}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                       />
                       {isSelected && (

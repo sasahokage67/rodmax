@@ -1646,6 +1646,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <img
                 src={lastCaught.fish.cardImage}
                 alt={getFishName(lastCaught.fish, language)}
+                decoding="async"
                 className="w-full h-full object-cover"
               />
               <div className="absolute bottom-2 right-2 bg-black/80 border border-zinc-800 px-2 py-0.5 font-arcade text-[9px]">

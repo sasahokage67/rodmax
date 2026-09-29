@@ -30,16 +30,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
     { 
       title: t('landing.previewClip1'), 
       src: '/assets/video_reeling_idle.mp4', 
+      poster: '/assets/bg_underwater.jpg',
       desc: t('landing.previewClip1Desc') 
     },
     { 
       title: t('landing.previewClip2'), 
       src: '/assets/video_catch_celestial_whale.mp4', 
+      poster: '/assets/card_celestial_whale.jpg',
       desc: t('landing.previewClip2Desc') 
     },
     { 
       title: t('landing.previewClip3'), 
       src: '/assets/video_catch_sea_serpent.mp4', 
+      poster: '/assets/card_sea_serpent.jpg',
       desc: t('landing.previewClip3Desc') 
     }
   ];
@@ -152,13 +155,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
               <div className="relative aspect-video bg-black overflow-hidden border border-emerald-500/30">
                 <video
                   key={previewClips[activePreviewIndex].src}
-                  src={previewClips[activePreviewIndex].src}
+                  poster={previewClips[activePreviewIndex].poster}
+                  preload="metadata"
                   autoPlay
                   loop
                   muted
                   playsInline
                   className="w-full h-full object-cover"
-                />
+                >
+                  <source src={previewClips[activePreviewIndex].src.replace('.mp4', '.webm')} type="video/webm" />
+                  <source src={previewClips[activePreviewIndex].src} type="video/mp4" />
+                  <img
+                    src={previewClips[activePreviewIndex].poster}
+                    alt={previewClips[activePreviewIndex].title}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full h-full object-cover"
+                  />
+                </video>
                 
                 <div className="absolute top-3 left-3 px-2.5 py-1 bg-black/80 border border-emerald-400 text-emerald-300 font-arcade text-[9px] flex items-center gap-1.5">
                   <Zap className="w-3 h-3 text-amber-400" />
@@ -218,7 +232,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
             onClick={() => { sound.playReelClick(); onSelectFish(arcaneFish); }}
             className="w-48 sm:w-64 aspect-[4/3] bg-black border-2 border-emerald-400 overflow-hidden cursor-pointer hover:scale-105 transition-transform shadow-lg relative group flex-shrink-0"
           >
-            <img src={arcaneFish.cardImage} alt={getFishName(arcaneFish, language)} className="w-full h-full object-cover" />
+            <img 
+              src={arcaneFish.cardImage} 
+              alt={getFishName(arcaneFish, language)} 
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover" 
+            />
             <div className="absolute inset-0 bg-emerald-500/10 group-hover:bg-transparent transition-colors" />
             <div className="absolute bottom-2 left-2 right-2 bg-black/80 px-2 py-1 font-arcade text-[9px] text-emerald-300 text-center border border-emerald-500/40">
               {language === 'ru' ? 'КЛИКНИ ДЛЯ ОСМОТРА' : 'CLICK TO INSPECT'}
@@ -337,6 +357,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                   <img
                     src={fish.cardImage}
                     alt={getFishName(fish, language)}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-black/90 border border-cyan-400 font-mono text-[9px] text-cyan-300 font-bold">
