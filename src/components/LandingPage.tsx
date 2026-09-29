@@ -109,14 +109,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
             </div>
 
             {/* Stats row */}
-            <div className="pt-4 border-t border-emerald-500/20 grid grid-cols-3 gap-4 font-arcade text-[10px]">
+            <div className="pt-4 border-t border-emerald-500/20 grid grid-cols-2 gap-4 font-arcade text-[10px]">
               <div>
-                <div className="text-emerald-500">ТРЕКИНГ ПК</div>
-                <div className="text-white text-xs mt-1">ВЕБ-КАМЕРА</div>
-              </div>
-              <div>
-                <div className="text-emerald-500">СМАРТФОН</div>
-                <div className="text-cyan-400 text-xs mt-1">ТАЧ / ПАЛЕЦ</div>
+                <div className="text-emerald-500">УПРАВЛЕНИЕ</div>
+                <div className="text-white text-xs mt-1">ВЕБ-КАМЕРА // 60 FPS</div>
               </div>
               <div>
                 <div className="text-emerald-500">ВЫСШИЙ ТИР</div>
@@ -230,7 +226,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 УПРАВЛЕНИЕ ЖЕСТАМИ И ВЕБ-КАМЕРОЙ
               </h2>
               <p className="font-arcade text-[10px] text-zinc-400 mt-1">
-                ФИЗИЧЕСКИЕ ДВИЖЕНИЯ РУК ЧЕРЕЗ ВЕБ-КАМЕРУ НА ПК // СЕНСОРНОЕ УПРАВЛЕНИЕ ПАЛЬЦЕМ НА ТЕЛЕФОНЕ
+                ФИЗИЧЕСКИЕ ДВИЖЕНИЯ РУК ЧЕРЕЗ ВЕБ-КАМЕРУ В РЕАЛЬНОМ ВРЕМЕНИ
               </p>
             </div>
             <div className="flex items-center gap-2 font-arcade text-[9px] text-emerald-400">
@@ -393,9 +389,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                   1
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА ИЛИ ТАЧСКРИН</h4>
+                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    На ПК разрешите доступ к веб-камере для управления взмахами рук. На смартфоне играйте прямо пальцем по сенсорному экрану.
+                    Разрешите доступ к веб-камере в браузере для оптического трекинга жестов и взмахов рук в реальном времени.
                   </p>
                 </div>
               </div>
@@ -429,9 +425,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                   4
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ РУКОЙ / ПАЛЬЦЕМ</h4>
+                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ ДВИЖЕНИЕМ РУКИ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Удерживайте рыбу в зеленой зоне: на ПК поднимайте или опускайте ладонь перед камерой, на смартфоне — ведите пальцем по шкале. Заполните прогресс до 100%!
+                    Поместите ладонь в кадр камеры и удерживайте маркер ладони прямо на рыбе в окне арены. Заполните шкалу до 100%!
                   </p>
                 </div>
               </div>
