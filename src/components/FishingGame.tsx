@@ -287,7 +287,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
           const diff = Math.abs(lumNow - lumPrev);
 
-          if (diff > 20) {
+          // Responsive differential motion threshold
+          if (diff > 15) {
             diffSum += diff;
             const pixelIdx = i / 4;
             const x = pixelIdx % 64;
@@ -296,12 +297,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             weightedY += y;
             motionPoints++;
 
-            // Detect top-most finger points (finger pointing up towards camera)
+            // Detect top-most finger points (index fingertip apex pointing towards camera)
             if (y < minY) {
               minY = y;
               tipMotionSumX = x;
               tipMotionCount = 1;
-            } else if (y <= minY + 2) {
+            } else if (y <= minY + 1.5) {
               tipMotionSumX += x;
               tipMotionCount++;
             }
@@ -314,7 +315,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           setMotionIntensity(avgMotion);
         }
 
-        if (motionPoints > 8) {
+        if (motionPoints > 6) {
           // Centroid coordinates (mirrored X)
           const centroidX = (1 - (weightedX / motionPoints) / 64) * 100;
           const centroidY = ((weightedY / motionPoints) / 48) * 100;
@@ -322,17 +323,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           let rawX = centroidX;
           let rawY = centroidY;
 
-          // Focus strictly on fingertip apex (90% tip + 10% centroid: zero knuckle pull, zero noise!)
+          // MAXIMUM EMPHASIS ON INDEX FINGERTIP APEX (98% tip + 2% anchor: zero knuckle pull!)
           if (tipMotionCount > 0) {
             const tipX = (1 - (tipMotionSumX / tipMotionCount) / 64) * 100;
-            const tipY = ((minY + 0.8) / 48) * 100;
-            rawX = tipX * 0.90 + centroidX * 0.10;
-            rawY = tipY * 0.90 + centroidY * 0.10;
+            const tipY = ((minY + 0.3) / 48) * 100;
+            rawX = tipX * 0.98 + centroidX * 0.02;
+            rawY = tipY * 0.98 + centroidY * 0.02;
           }
 
-          // Smooth low-pass filter
-          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.50;
-          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.50;
+          // Ultra-low latency tracking filter (0.85 response rate = instant real-time reaction)
+          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.85;
+          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.85;
 
           setHandPos({
             x: Math.round(handPosRef.current.x),
@@ -1399,7 +1400,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </div>
                 </div>
 
-                {/* 3. PLAYER'S FINGERTIP RETICLE (Webcam optical tracker) */}
+                {/* 3. PLAYER'S FINGERTIP RETICLE (Webcam optical tracker - Maximum Emphasis on Index Fingertip) */}
                 {cameraStatus === 'ACTIVE' && (
                   <div 
                     className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-20 will-change-transform"
@@ -1408,17 +1409,33 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                       top: `${handPos.y}%`
                     }}
                   >
-                    <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
-                      isLockedOn 
-                        ? 'border-emerald-300 bg-emerald-400/25 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
-                        : 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
-                    }`}>
-                      <span className="text-lg filter drop-shadow-[0_0_6px_rgba(34,211,238,0.8)]">☝️</span>
+                    <div className="relative flex items-center justify-center">
+                      {/* Spinning outer tactical crosshair ring */}
+                      <div className={`w-14 h-14 rounded-full border-2 border-dashed animate-[spin_8s_linear_infinite] transition-colors duration-150 ${
+                        isLockedOn 
+                          ? 'border-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.9)]' 
+                          : 'border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.7)]'
+                      }`} />
+
+                      {/* Precise Center Fingertip Beacon */}
+                      <div className={`absolute w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
+                        isLockedOn 
+                          ? 'border-emerald-300 bg-emerald-400/35 ring-2 ring-emerald-400/80 shadow-[0_0_15px_#10b981]' 
+                          : 'border-cyan-300 bg-cyan-400/30 ring-1 ring-cyan-400/60 shadow-[0_0_10px_#06b6d4]'
+                      }`}>
+                        <span className="text-xl filter drop-shadow-[0_0_8px_rgba(34,211,238,1)]">☝️</span>
+                      </div>
+
+                      {/* Laser Apex Targeting Dot directly on the fingertip */}
+                      <div className="absolute -top-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-black animate-ping" />
+                      <div className="absolute -top-1 w-2 h-2 bg-amber-300 rounded-full border border-black shadow-[0_0_8px_#fbbf24]" />
                     </div>
-                    <div className={`px-1.5 py-0.5 bg-black/90 border font-arcade text-[7px] mt-1 ${
-                      isLockedOn ? 'border-emerald-400 text-emerald-300' : 'border-cyan-400 text-cyan-300'
+
+                    <div className={`px-2 py-0.5 bg-black/95 border font-arcade text-[8px] mt-1.5 shadow-md flex items-center gap-1 ${
+                      isLockedOn ? 'border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/60' : 'border-cyan-400 text-cyan-300'
                     }`}>
-                      {isLockedOn ? '☝️ ПАЛЕЦ НА РЫБЕ' : '☝️ ПРИЦЕЛ ПАЛЬЦА'}
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span>{isLockedOn ? '☝️ ПАЛЕЦ В ЦЕЛИ!' : '☝️ КОНЧИК ПАЛЬЦА'}</span>
                     </div>
                   </div>
                 )}
@@ -1611,8 +1628,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     top: `${handPos.y}%`
                   }}
                 >
-                  <div className="w-5 h-5 rounded-full border border-cyan-400 bg-cyan-400/30 shadow-[0_0_8px_rgba(34,211,238,0.8)] flex items-center justify-center text-[10px]">
-                    ☝️
+                  <div className="relative flex items-center justify-center">
+                    <div className="w-6 h-6 rounded-full border border-cyan-400 bg-cyan-400/20 shadow-[0_0_10px_rgba(34,211,238,0.9)] flex items-center justify-center text-[10px]">
+                      ☝️
+                    </div>
+                    {/* Glowing apex point directly on fingertip */}
+                    <div className="absolute -top-1 w-2 h-2 rounded-full bg-amber-300 border border-black shadow-[0_0_6px_#f59e0b]" />
                   </div>
                 </div>
               )}
