@@ -82,6 +82,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Camera & Canvas refs
   const webcamVideoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
@@ -141,8 +142,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       })
       .then((s) => {
         stream = s;
+        mediaStreamRef.current = s;
         if (webcamVideoRef.current) {
           webcamVideoRef.current.srcObject = s;
+          webcamVideoRef.current.play().catch(() => {});
         }
         setCameraStatus('ACTIVE');
       })
@@ -151,6 +154,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       });
     } else {
       setCameraStatus('OFF');
+      mediaStreamRef.current = null;
       if (webcamVideoRef.current && webcamVideoRef.current.srcObject) {
         const currentStream = webcamVideoRef.current.srcObject as MediaStream;
         currentStream.getTracks().forEach(t => t.stop());
@@ -164,6 +168,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       }
     };
   }, [cameraEnabled]);
+
+  // Ensure webcam video element gets the stream attached as soon as it mounts
+  useEffect(() => {
+    if (webcamVideoRef.current && mediaStreamRef.current && webcamVideoRef.current.srcObject !== mediaStreamRef.current) {
+      webcamVideoRef.current.srcObject = mediaStreamRef.current;
+      webcamVideoRef.current.play().catch(() => {});
+    }
+  }, [cameraStatus, cameraEnabled]);
 
   // 2. Optical Motion & 2D Hand Centroid Tracking Loop
   useEffect(() => {
@@ -787,7 +799,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 {/* 1. Live Webcam Feed in the Arena (Mirrored) */}
                 {cameraEnabled && cameraStatus === 'ACTIVE' ? (
                   <video
-                    ref={webcamVideoRef}
+                    ref={(el) => {
+                      if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
+                        el.srcObject = mediaStreamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }}
                     autoPlay
                     playsInline
                     muted
@@ -1002,18 +1019,85 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       </div>
 
-      {/* 4. Bottom Controls */}
-      <div className="relative z-20 px-3 sm:px-4 py-2 bg-[#06100a]/90 border-t border-emerald-500/40 flex flex-wrap justify-between items-center gap-3">
+      {/* 4. Bottom Controls & Persistent Live Camera Viewfinder HUD */}
+      <div className="relative z-20 px-3 sm:px-4 py-2 bg-[#06100a]/95 border-t border-emerald-500/50 backdrop-blur-md flex flex-wrap justify-between items-center gap-3">
         
+        {/* Left: Scheme and controls info */}
         <div className="flex flex-col gap-0.5 font-arcade text-[8px] sm:text-[9px] text-zinc-300">
-          <div className="text-emerald-400 font-bold">СХЕМА УПРАВЛЕНИЯ:</div>
-          <div><span className="text-cyan-400">[ПК]</span> Наводите физическую ладонь на рыбу прямо в окне камеры</div>
-          <div><span className="text-amber-400">[ТЕЛЕФОН]</span> Прижимайте палец к рыбе на экране и ведите за ней</div>
+          <div className="text-emerald-400 font-bold flex items-center gap-1.5">
+            <Camera className="w-3.5 h-3.5 text-emerald-400" />
+            <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
+          </div>
+          <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах ладонью вверх перед камерой или кнопка «Забросить»</div>
+          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при сигнале поклевки</div>
+          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Наводите ладонь в камере прямо на рыбу</div>
         </div>
 
-        <div className="font-arcade text-[8px] sm:text-[9px] text-emerald-400 ml-auto">
-          {cameraStatus === 'ACTIVE' ? '● ВЕБ-КАМЕРА: 60 FPS' : '○ ОЖИДАНИЕ КАМЕРЫ'}
-        </div>
+        {/* Right: Persistent Live Camera Viewfinder Window */}
+        {cameraEnabled && (
+          <div className="relative bg-black border-2 border-emerald-400 p-1 pixel-corners shadow-[0_0_20px_rgba(16,185,129,0.35)] w-40 sm:w-52 ml-auto">
+            <div className="flex items-center justify-between text-[7px] font-arcade text-zinc-300 mb-1 px-1">
+              <div className="flex items-center gap-1 text-emerald-300">
+                <div className={`w-1.5 h-1.5 rounded-full ${cameraStatus === 'ACTIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                <span>ВЕБ-КАМЕРА</span>
+              </div>
+              <div className={cameraStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}>
+                {cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
+              </div>
+            </div>
+
+            <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
+              <video
+                ref={webcamVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
+              />
+
+              {/* Hand Tracking Reticle inside Camera Viewfinder */}
+              {cameraStatus === 'ACTIVE' && (
+                <div 
+                  className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 z-10"
+                  style={{
+                    left: `${handPos.x}%`,
+                    top: `${handPos.y}%`
+                  }}
+                >
+                  <div className="w-5 h-5 rounded-full border border-cyan-400 bg-cyan-400/20 shadow-[0_0_8px_rgba(34,211,238,0.8)] flex items-center justify-center text-[10px]">
+                    ✋
+                  </div>
+                </div>
+              )}
+
+              {/* Camera Status Overlays */}
+              {cameraStatus === 'CONNECTING' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center font-arcade text-[7px] text-amber-300 bg-black/85">
+                  <Activity className="w-3.5 h-3.5 animate-spin mb-1 text-amber-400" />
+                  <span>ПОДКЛЮЧЕНИЕ КАМЕРЫ...</span>
+                </div>
+              )}
+
+              {cameraStatus === 'DENIED' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-1.5 text-center font-arcade text-[7px] text-red-400 bg-black/90">
+                  <CameraOff className="w-3.5 h-3.5 mb-0.5 text-red-400" />
+                  <span>ДОСТУП ЗАПРЕЩЕН</span>
+                  <span className="text-[6px] text-zinc-400 mt-0.5">РАЗРЕШИТЕ В БРАУЗЕРЕ</span>
+                </div>
+              )}
+
+              <div className="absolute inset-0 border border-emerald-500/20 pointer-events-none" />
+            </div>
+
+            {/* Bottom Camera Telemetry */}
+            <div className="mt-1 flex justify-between font-arcade text-[7px] text-zinc-400 px-1">
+              <span>ДВИЖЕНИЕ:</span>
+              <span className={motionIntensity > 20 ? 'text-emerald-400 font-bold' : 'text-zinc-500'}>
+                {motionIntensity}%
+              </span>
+            </div>
+          </div>
+        )}
 
       </div>
 
