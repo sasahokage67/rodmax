@@ -137,7 +137,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   // Inventory filter state
   const [selectedRarity, setSelectedRarity] = useState<string>('ALL');
-  const [viewMode, setViewMode] = useState<'ALL_CAUGHT' | 'IN_BASKET' | 'FULL_BESTIARY'>('ALL_CAUGHT');
+  const [viewMode, setViewMode] = useState<'IN_BASKET' | 'ALL_CAUGHT' | 'FULL_BESTIARY'>('IN_BASKET');
 
   // Callsign validation
   const handleCallsignChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -262,13 +262,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     return profile.inventory.reduce((sum, item) => sum + item.price, 0);
   }, [profile.inventory]);
 
-  // Filter items by view mode and rarity
+  // Active inventory items (in sadok)
+  const displayedInventory = useMemo(() => {
+    let list = profile.inventory;
+    if (selectedRarity !== 'ALL') {
+      list = list.filter(item => item.fish.rarity === selectedRarity);
+    }
+    return list;
+  }, [profile.inventory, selectedRarity]);
+
+  // Shiny catches currently in basket
+  const shinyCountInBasket = useMemo(() => {
+    return profile.inventory.filter(item => item.isShiny).length;
+  }, [profile.inventory]);
+
+  // Filter items by view mode and rarity for Bestiary
   const displayedFish = useMemo(() => {
     let list = allFishStats;
     if (viewMode === 'ALL_CAUGHT') {
       list = list.filter(item => item.hasCaughtEver);
-    } else if (viewMode === 'IN_BASKET') {
-      list = list.filter(item => item.basketCount > 0);
     }
 
     if (selectedRarity !== 'ALL') {
@@ -700,32 +712,37 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <div className="flex flex-wrap items-center gap-2 font-arcade text-[9px]">
               <span className="text-zinc-500 mr-1">РЕЖИМ:</span>
               <button
-                onClick={() => { sound.playReelClick(); setViewMode('ALL_CAUGHT'); }}
-                className={`px-3 py-1.5 border transition-all ${
-                  viewMode === 'ALL_CAUGHT'
-                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold'
+                onClick={() => { sound.playReelClick(); setViewMode('IN_BASKET'); }}
+                className={`px-3 py-1.5 border transition-all flex items-center gap-1.5 ${
+                  viewMode === 'IN_BASKET'
+                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.3)]'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
-                ВСЕ ВЫЛОВЛЕННЫЕ ({caughtSpeciesCount})
+                <span>В САДКЕ ({profile.inventory.length} ШТ)</span>
+                {shinyCountInBasket > 0 && (
+                  <span className="px-1 py-0.2 bg-amber-400 text-black text-[7px] font-bold">
+                    ✨{shinyCountInBasket} SHINY
+                  </span>
+                )}
               </button>
 
               <button
-                onClick={() => { sound.playReelClick(); setViewMode('IN_BASKET'); }}
+                onClick={() => { sound.playReelClick(); setViewMode('ALL_CAUGHT'); }}
                 className={`px-3 py-1.5 border transition-all ${
-                  viewMode === 'IN_BASKET'
-                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold'
+                  viewMode === 'ALL_CAUGHT'
+                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.3)]'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
-                В САДКЕ ({profile.inventory.length} ШТ)
+                БЕСТИАРИЙ ({caughtSpeciesCount})
               </button>
 
               <button
                 onClick={() => { sound.playReelClick(); setViewMode('FULL_BESTIARY'); }}
                 className={`px-3 py-1.5 border transition-all ${
                   viewMode === 'FULL_BESTIARY'
-                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold'
+                    ? 'bg-emerald-500 text-black border-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.3)]'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
                 }`}
               >
@@ -752,112 +769,228 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
           </div>
 
-          {/* Empty State */}
-          {displayedFish.length === 0 ? (
-            <div className="p-12 text-center bg-[#07130e]/80 border-2 border-dashed border-emerald-500/40 pixel-corners space-y-4">
-              <div className="text-4xl">🐟</div>
-              <h3 className="font-arcade text-sm text-emerald-300">
-                {viewMode === 'IN_BASKET' ? 'САДОК СЕЙЧАС ПУСТ!' : 'НЕТ РЫБ В ВЫБРАННОЙ КАТЕГОРИИ!'}
-              </h3>
-              <p className="font-mono text-xs text-zinc-400 max-w-md mx-auto">
-                {viewMode === 'IN_BASKET' 
-                  ? 'Все выловленные рыбы уже проданы, либо вы еще не выловили свежий улов. Отправляйтесь на рыбалку или переключитесь на «ВСЕ ВЫЛОВЛЕННЫЕ», чтобы посмотреть историю!'
-                  : 'Попробуйте сбросить фильтр редкости или отправляйтесь на глубоководный заброс!'}
-              </p>
-              <div className="flex justify-center gap-3">
-                {viewMode === 'IN_BASKET' && (
+          {/* VIEW MODE 1: ACTIVE FISHING BASKET (IN_BASKET) */}
+          {viewMode === 'IN_BASKET' ? (
+            displayedInventory.length === 0 ? (
+              <div className="p-12 text-center bg-[#07130e]/80 border-2 border-dashed border-emerald-500/40 pixel-corners space-y-4">
+                <div className="text-4xl">🐟</div>
+                <h3 className="font-arcade text-sm text-emerald-300">
+                  {selectedRarity !== 'ALL' ? 'НЕТ РЫБ ВЫБРАННОЙ РЕДКОСТИ В САДКЕ!' : 'САДОК СЕЙЧАС ПУСТ!'}
+                </h3>
+                <p className="font-mono text-xs text-zinc-400 max-w-md mx-auto">
+                  {selectedRarity !== 'ALL'
+                    ? 'Попробуйте сбросить фильтр редкости на «ВСЕ», чтобы увидеть весь улов.'
+                    : 'Все пойманные рыбы уже проданы, либо вы еще не выловили свежий улов. Отправляйтесь на рыбалку или посмотрите Бестиарий!'}
+                </p>
+                <div className="flex justify-center gap-3">
                   <button
-                    onClick={() => setViewMode('ALL_CAUGHT')}
+                    onClick={() => { sound.playReelClick(); setViewMode('ALL_CAUGHT'); }}
                     className="py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 text-white font-arcade text-xs border border-zinc-600"
                   >
-                    ПОКАЗАТЬ ВСЕ ПОЙМАННЫЕ
+                    ОТКРЫТЬ БЕСТИАРИЙ
                   </button>
-                )}
-                <button
-                  onClick={() => { sound.playCast(); setTab('fishing'); }}
-                  className="py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] inline-flex items-center gap-2"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>НА РЫБАЛКУ</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Cards Grid */
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {displayedFish.map(({ fish, basketCount, basketValue, lifetimeCount, recordWeight, hasCaughtEver }) => (
-                <div
-                  key={fish.id}
-                  className={`bg-[#07130e] border-2 p-3 pixel-corners space-y-3 shadow-md transition-all ${
-                    hasCaughtEver 
-                      ? 'border-emerald-500/60 hover:border-emerald-400' 
-                      : 'border-zinc-800 opacity-60'
-                  }`}
-                >
-                  {/* Card Image with Count Badge */}
-                  <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
-                    <img
-                      src={fish.cardImage}
-                      alt={fish.name}
-                      className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${
-                        !hasCaughtEver ? 'grayscale brightness-50' : ''
-                      }`}
-                    />
-
-                    {/* How many times caught badge (xCount) */}
-                    <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
-                      {hasCaughtEver ? `ПОЙМАНО: x${lifetimeCount}` : 'НЕ ПОЙМАНО'}
-                    </div>
-
-                    <div 
-                      className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/80 border font-arcade text-[8px]"
-                      style={{ borderColor: fish.color, color: fish.color }}
-                    >
-                      {fish.rarity}
-                    </div>
-                  </div>
-
-                  {/* Fish Info */}
-                  <div>
-                    <h4 className="font-arcade text-xs text-white truncate">{fish.name}</h4>
-                    <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
-                      <div className="flex justify-between">
-                        <span>Рекордный вес:</span>
-                        <span className="text-emerald-400 font-bold">
-                          {recordWeight > 0 ? `${recordWeight} кг` : '—'}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between">
-                        <span>В садке сейчас:</span>
-                        <span className={basketCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-600'}>
-                          {basketCount > 0 ? `${basketCount} шт (${basketValue.toLocaleString()} C)` : '0 шт'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Sell or Status Action */}
-                  {basketCount > 0 && onSellFish ? (
-                    <button
-                      onClick={() => { sound.playCoin(); onSellFish(fish.id); }}
-                      className="w-full py-2 bg-zinc-900 hover:bg-amber-500 hover:text-black text-amber-300 font-arcade text-[9px] border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <span>ПРОДАТЬ {basketCount} ШТ (+{basketValue.toLocaleString()} C)</span>
-                    </button>
-                  ) : hasCaughtEver ? (
-                    <div className="w-full py-1.5 bg-zinc-950/80 border border-zinc-800 text-zinc-500 font-arcade text-[8px] text-center">
-                      ВСЕ ЭКЗЕМПЛЯРЫ ПРОДАНЫ
-                    </div>
-                  ) : (
-                    <div className="w-full py-1.5 bg-black border border-zinc-900 text-zinc-600 font-arcade text-[8px] text-center">
-                      ВИД ЕЩЕ НЕ ВЫЛОВЛЕН
-                    </div>
-                  )}
-
+                  <button
+                    onClick={() => { sound.playCast(); setTab('fishing'); }}
+                    className="py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] inline-flex items-center gap-2"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>НА РЫБАЛКУ</span>
+                  </button>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {displayedInventory.map((item, index) => {
+                  const isShiny = !!item.isShiny;
+                  return (
+                    <div
+                      key={item.id || `${item.fish.id}_${item.weight}_${index}`}
+                      className={`bg-[#07130e] border-2 p-3 pixel-corners space-y-3 shadow-md transition-all relative ${
+                        isShiny
+                          ? 'border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.35)] ring-1 ring-amber-400/40 bg-gradient-to-b from-amber-950/20 via-[#07130e] to-[#07130e]'
+                          : 'border-emerald-500/60 hover:border-emerald-400'
+                      }`}
+                    >
+                      {/* Card Image with Badges */}
+                      <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
+                        <img
+                          src={item.fish.cardImage}
+                          alt={item.fish.name}
+                          className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+                        />
+
+                        {/* Shiny Mutation Badge */}
+                        {isShiny && (
+                          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 bg-amber-950/95 border border-amber-300 font-arcade text-[8px] text-amber-300 flex items-center gap-1 shadow-[0_0_10px_rgba(251,191,36,0.6)] animate-pulse">
+                            <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
+                            <span>SHINY [2X ЦЕНА]</span>
+                          </div>
+                        )}
+
+                        {/* Weight Badge */}
+                        <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
+                          {item.weight} КГ
+                        </div>
+
+                        {/* Rarity Badge */}
+                        <div 
+                          className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/80 border font-arcade text-[8px]"
+                          style={{ borderColor: item.fish.color, color: item.fish.color }}
+                        >
+                          {item.fish.rarity}
+                        </div>
+                      </div>
+
+                      {/* Fish Info */}
+                      <div>
+                        <div className="flex items-center justify-between gap-1">
+                          <h4 className="font-arcade text-xs text-white truncate">{item.fish.name}</h4>
+                          {isShiny && (
+                            <span className="text-[8px] font-arcade text-amber-400 flex-shrink-0 animate-pulse">
+                              ✨ SHINY
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
+                          <div className="flex justify-between">
+                            <span>Вес особи:</span>
+                            <span className="text-emerald-400 font-bold">{item.weight} кг</span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center">
+                            <span>Стоимость продажи:</span>
+                            <span className={`font-bold flex items-center gap-1 ${isShiny ? 'text-amber-400 font-arcade text-xs' : 'text-emerald-400'}`}>
+                              +{item.price.toLocaleString()} C
+                              {isShiny && <span className="text-[8px] text-amber-300 bg-amber-950 px-1 border border-amber-500/50">2X</span>}
+                            </span>
+                          </div>
+
+                          {item.caughtAt && (
+                            <div className="flex justify-between text-[9px] text-zinc-500">
+                              <span>Выловлена:</span>
+                              <span>{item.caughtAt}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Individual Sell Action */}
+                      {onSellFish && (
+                        <button
+                          onClick={() => { sound.playCoin(); onSellFish(item.id || item.fish.id); }}
+                          className={`w-full py-2 font-arcade text-[9px] border transition-colors flex items-center justify-center gap-1.5 shadow-sm ${
+                            isShiny
+                              ? 'bg-amber-500/20 hover:bg-amber-400 hover:text-black text-amber-300 border-amber-400'
+                              : 'bg-zinc-900 hover:bg-emerald-500 hover:text-black text-emerald-300 border-emerald-500/40 hover:border-emerald-400'
+                          }`}
+                        >
+                          <Coins className="w-3.5 h-3.5" />
+                          <span>ПРОДАТЬ (+{item.price.toLocaleString()} C)</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            /* VIEW MODE 2: BESTIARY & CATALOG (ALL_CAUGHT or FULL_BESTIARY) */
+            displayedFish.length === 0 ? (
+              <div className="p-12 text-center bg-[#07130e]/80 border-2 border-dashed border-emerald-500/40 pixel-corners space-y-4">
+                <div className="text-4xl">🐟</div>
+                <h3 className="font-arcade text-sm text-emerald-300">
+                  НЕТ РЫБ В ВЫБРАННОЙ КАТЕГОРИИ БЕСТИАРИЯ!
+                </h3>
+                <p className="font-mono text-xs text-zinc-400 max-w-md mx-auto">
+                  Попробуйте сбросить фильтр редкости или отправляйтесь на глубоководный заброс!
+                </p>
+                <div className="flex justify-center gap-3">
+                  <button
+                    onClick={() => { sound.playCast(); setTab('fishing'); }}
+                    className="py-2.5 px-5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b] inline-flex items-center gap-2"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>НА РЫБАЛКУ</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {displayedFish.map(({ fish, basketCount, basketValue, lifetimeCount, recordWeight, hasCaughtEver }) => (
+                  <div
+                    key={fish.id}
+                    className={`bg-[#07130e] border-2 p-3 pixel-corners space-y-3 shadow-md transition-all ${
+                      hasCaughtEver 
+                        ? 'border-emerald-500/60 hover:border-emerald-400' 
+                        : 'border-zinc-800 opacity-60'
+                    }`}
+                  >
+                    {/* Card Image with Count Badge */}
+                    <div className="relative aspect-[4/3] bg-black overflow-hidden border border-zinc-800">
+                      <img
+                        src={fish.cardImage}
+                        alt={fish.name}
+                        className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${
+                          !hasCaughtEver ? 'grayscale brightness-50' : ''
+                        }`}
+                      />
+
+                      {/* How many times caught badge (xCount) */}
+                      <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
+                        {hasCaughtEver ? `ПОЙМАНО: x${lifetimeCount}` : 'НЕ ПОЙМАНО'}
+                      </div>
+
+                      <div 
+                        className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/80 border font-arcade text-[8px]"
+                        style={{ borderColor: fish.color, color: fish.color }}
+                      >
+                        {fish.rarity}
+                      </div>
+                    </div>
+
+                    {/* Fish Info */}
+                    <div>
+                      <h4 className="font-arcade text-xs text-white truncate">{fish.name}</h4>
+                      <div className="font-mono text-[11px] text-zinc-400 space-y-1 mt-1.5">
+                        <div className="flex justify-between">
+                          <span>Рекордный вес:</span>
+                          <span className="text-emerald-400 font-bold">
+                            {recordWeight > 0 ? `${recordWeight} кг` : '—'}
+                          </span>
+                        </div>
+                        
+                        <div className="flex justify-between">
+                          <span>В садке сейчас:</span>
+                          <span className={basketCount > 0 ? 'text-amber-400 font-bold' : 'text-zinc-600'}>
+                            {basketCount > 0 ? `${basketCount} шт (${basketValue.toLocaleString()} C)` : '0 шт'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Sell or Status Action */}
+                    {basketCount > 0 && onSellFish ? (
+                      <button
+                        onClick={() => { sound.playCoin(); onSellFish(fish.id); }}
+                        className="w-full py-2 bg-zinc-900 hover:bg-amber-500 hover:text-black text-amber-300 font-arcade text-[9px] border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <span>ПРОДАТЬ ВСЕ {basketCount} ШТ (+{basketValue.toLocaleString()} C)</span>
+                      </button>
+                    ) : hasCaughtEver ? (
+                      <div className="w-full py-1.5 bg-zinc-950/80 border border-zinc-800 text-zinc-500 font-arcade text-[8px] text-center">
+                        ОТКРЫТО В БЕСТИАРИИ
+                      </div>
+                    ) : (
+                      <div className="w-full py-1.5 bg-black border border-zinc-900 text-zinc-600 font-arcade text-[8px] text-center">
+                        ВИД ЕЩЕ НЕ ВЫЛОВЛЕН
+                      </div>
+                    )}
+
+                  </div>
+                ))}
+              </div>
+            )
           )}
 
         </section>

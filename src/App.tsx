@@ -126,13 +126,27 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleSellFish = (fishId?: string) => {
+  const handleSellFish = (identifier?: string) => {
     setProfile(prev => {
-      if (fishId) {
-        const toSell = prev.inventory.filter(item => item.fish.id === fishId);
+      if (identifier) {
+        // Check if identifier is a unique catch ID (item.id)
+        const itemIndex = prev.inventory.findIndex(item => item.id === identifier);
+        if (itemIndex !== -1) {
+          const itemToSell = prev.inventory[itemIndex];
+          const remaining = [...prev.inventory];
+          remaining.splice(itemIndex, 1);
+          return {
+            ...prev,
+            coins: prev.coins + itemToSell.price,
+            inventory: remaining
+          };
+        }
+
+        // Otherwise check if identifier is a fish species ID (item.fish.id)
+        const toSell = prev.inventory.filter(item => item.fish.id === identifier);
         if (toSell.length === 0) return prev;
         const earned = toSell.reduce((sum, item) => sum + item.price, 0);
-        const remaining = prev.inventory.filter(item => item.fish.id !== fishId);
+        const remaining = prev.inventory.filter(item => item.fish.id !== identifier);
         return {
           ...prev,
           coins: prev.coins + earned,

@@ -19,11 +19,13 @@ export interface FishItem {
 }
 
 export interface CaughtFish {
+  id?: string;
   fish: FishItem;
   weight: number;
   price: number;
   caughtAt: string;
   expEarned?: number;
+  isShiny?: boolean;
 }
 
 export interface AnglerProfile {

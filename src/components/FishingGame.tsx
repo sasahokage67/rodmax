@@ -455,10 +455,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
     const isArcane = targetFish.rarity === 'ARCANE';
     sound.playCatch(isArcane);
-    sound.playCoin();
-
+    const isShiny = Math.random() < 0.10; // Exactly 10% Shiny chance!
     const weight = +(targetFish.weightMin + Math.random() * (targetFish.weightMax - targetFish.weightMin)).toFixed(1);
-    const price = Math.round(targetFish.basePrice * (weight / targetFish.weightMin));
+    const baseCalculatedPrice = Math.round(targetFish.basePrice * (weight / targetFish.weightMin));
+    const price = isShiny ? baseCalculatedPrice * 2 : baseCalculatedPrice;
 
     const baseExpMap: Record<string, number> = {
       COMMON: 30,
@@ -469,17 +469,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       GODLY: 1600,
       ARCANE: 4000
     };
-    const expEarned = Math.round(
+    const rawExp = Math.round(
       (baseExpMap[targetFish.rarity] || 40) * 
       (1 + ((weight - targetFish.weightMin) / (targetFish.weightMax - targetFish.weightMin || 1)) * 0.5)
     );
+    const expEarned = isShiny ? Math.round(rawExp * 1.5) : rawExp;
 
     const caughtRecord: CaughtFish = {
+      id: `caught_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       fish: targetFish,
       weight,
       price,
       caughtAt: new Date().toLocaleTimeString(),
-      expEarned
+      expEarned,
+      isShiny
     };
 
     setLastCaught(caughtRecord);
@@ -914,8 +917,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <span>ТРОФЕЙ ВЫЛОВЛЕН!</span>
             </div>
 
+            {/* Rare SHINY Badge if rolled */}
+            {lastCaught.isShiny && (
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-amber-500/30 via-yellow-400/30 to-amber-500/30 border-2 border-amber-300 font-arcade text-[10px] text-amber-200 shadow-[0_0_20px_rgba(251,191,36,0.6)] animate-pulse">
+                <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                <span>✨ РЕДКАЯ МУТАЦИЯ: SHINY (+100% К ЦЕНЕ!) ✨</span>
+              </div>
+            )}
+
             {/* Fish Card Preview (REVEALED!) */}
-            <div className="relative aspect-[4/3] w-56 sm:w-64 mx-auto border-2 border-amber-400 overflow-hidden bg-black shadow-lg">
+            <div className={`relative aspect-[4/3] w-56 sm:w-64 mx-auto overflow-hidden bg-black shadow-lg transition-all ${
+              lastCaught.isShiny 
+                ? 'border-2 border-amber-300 shadow-[0_0_30px_rgba(251,191,36,0.7)] ring-2 ring-yellow-400/60' 
+                : 'border-2 border-amber-400'
+            }`}>
               <img
                 src={lastCaught.fish.cardImage}
                 alt={lastCaught.fish.name}
@@ -928,7 +943,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </div>
 
             <div>
-              <h3 className="font-arcade text-sm text-white">{lastCaught.fish.name}</h3>
+              <div className="flex items-center justify-center gap-1.5">
+                {lastCaught.isShiny && <Sparkles className="w-4 h-4 text-amber-300" />}
+                <h3 className={`font-arcade text-sm ${lastCaught.isShiny ? 'text-amber-200 font-bold' : 'text-white'}`}>
+                  {lastCaught.fish.name} {lastCaught.isShiny ? '[SHINY]' : ''}
+                </h3>
+              </div>
               <p className="font-mono text-xs text-zinc-300 mt-1">
                 Вес: <span className="text-emerald-400 font-bold">{lastCaught.weight} кг</span> · Ценность: <span className="text-amber-400 font-bold">{lastCaught.price.toLocaleString()} C</span>
               </p>
