@@ -111,12 +111,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
             {/* Stats row */}
             <div className="pt-4 border-t border-emerald-500/20 grid grid-cols-3 gap-4 font-arcade text-[10px]">
               <div>
-                <div className="text-emerald-500">ТРЕКИНГ</div>
+                <div className="text-emerald-500">ТРЕКИНГ ПК</div>
                 <div className="text-white text-xs mt-1">ВЕБ-КАМЕРА</div>
               </div>
               <div>
-                <div className="text-emerald-500">РЕЗЕРВ</div>
-                <div className="text-cyan-400 text-xs mt-1">МЫШЬ / ПРОБЕЛ</div>
+                <div className="text-emerald-500">СМАРТФОН</div>
+                <div className="text-cyan-400 text-xs mt-1">ТАЧ / ПАЛЕЦ</div>
               </div>
               <div>
                 <div className="text-emerald-500">ВЫСШИЙ ТИР</div>
@@ -230,12 +230,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 УПРАВЛЕНИЕ ЖЕСТАМИ И ВЕБ-КАМЕРОЙ
               </h2>
               <p className="font-arcade text-[10px] text-zinc-400 mt-1">
-                ОПТИЧЕСКИЙ ТРЕКИНГ ДВИЖЕНИЯ В БРАУЗЕРЕ + МЫШЬ И КЛАВИАТУРА В КАЧЕСТВЕ РЕЗЕРВА
+                ФИЗИЧЕСКИЕ ДВИЖЕНИЯ РУК ЧЕРЕЗ ВЕБ-КАМЕРУ НА ПК // СЕНСОРНОЕ УПРАВЛЕНИЕ ПАЛЬЦЕМ НА ТЕЛЕФОНЕ
               </p>
             </div>
             <div className="flex items-center gap-2 font-arcade text-[9px] text-emerald-400">
               <Camera className="w-4 h-4" />
-              <span>ВЕБ-КАМЕРА // 60 FPS MOTION</span>
+              <span>ВЕБ-КАМЕРА // 60 FPS</span>
             </div>
           </div>
 
@@ -393,9 +393,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                   1
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА ИЛИ МЫШЬ</h4>
+                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА ИЛИ ТАЧСКРИН</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Разрешите браузеру доступ к веб-камере для управления жестами рук в реальном времени. В любой момент можно играть кликами мыши или клавишей <strong className="text-emerald-400">[ПРОБЕЛ]</strong>.
+                    На ПК разрешите доступ к веб-камере для управления взмахами рук. На смартфоне играйте прямо пальцем по сенсорному экрану.
                   </p>
                 </div>
               </div>
@@ -407,7 +407,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-white">ЗАБРОС СНАСТИ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Сделайте взмах ладонью вверх перед объективом камеры либо нажмите <strong className="text-emerald-400">[ПРОБЕЛ]</strong> или кнопку «Забросить удочку». Блесна отправится на глубину.
+                    Сделайте взмах ладонью вверх перед объективом камеры либо нажмите кнопку «Забросить удочку». Блесна отправится на глубину.
                   </p>
                 </div>
               </div>
@@ -419,7 +419,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-amber-300">ПОДСЕЧКА (! КЛЮЕТ !)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Когда раздастся резкий сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или быстро нажмите <strong className="text-amber-400">[ПРОБЕЛ]</strong>, чтобы подсечь рыбу.
+                    Когда раздастся резкий сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или нажмите «Подсечь рыбу».
                   </p>
                 </div>
               </div>
@@ -429,9 +429,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                   4
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ И БАЛАНС</h4>
+                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ РУКОЙ / ПАЛЬЦЕМ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Удерживайте зеленую полосу натяжения на рыбе. Поднимайте ладонь выше перед камерой (или зажимайте <strong className="text-cyan-400">[ЛКМ / ПРОБЕЛ]</strong>), чтобы поднимать планку. Опускайте руку, чтобы спускать. Заполните шкалу до 100%!
+                    Удерживайте рыбу в зеленой зоне: на ПК поднимайте или опускайте ладонь перед камерой, на смартфоне — ведите пальцем по шкале. Заполните прогресс до 100%!
                   </p>
                 </div>
               </div>
