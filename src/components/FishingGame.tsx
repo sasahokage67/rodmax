@@ -63,6 +63,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const lastReportedProgressRef = useRef(0);
   const lastCastTimeRef = useRef(0);
 
+  // Thumbs Up (👍) Gesture Detection State
+  const [isThumbsUp, setIsThumbsUp] = useState(false);
+  const thumbsUpCounterRef = useRef(0);
+
   // Assistance & Hints State (idle hint and consecutive fails assistance)
   const [showIdleHint, setShowIdleHint] = useState(false);
   const [consecutiveFails, setConsecutiveFails] = useState(0);
@@ -347,6 +351,91 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           else if (stage === 'LANDING' && avgMotion > 16) {
             handleAcceptCatch();
           }
+        }
+
+        // LOW-THRESHOLD THUMBS UP (👍) GESTURE DETECTOR
+        // Runs in IDLE, CATCH_SUCCESS, LOST (lightweight, highly forgiving threshold)
+        if (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST') {
+          let skinMinX = 64, skinMaxX = 0, skinMinY = 48, skinMaxY = 0;
+          let skinCount = 0;
+
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            // Highly tolerant skin/hand detector across pale/tan/deep skin and diverse webcams
+            const isSkin = (r > 35 && g > 15 && b > 10 && r > b && (r >= g - 12)) ||
+                           (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[i]+prevPixels[i+1]+prevPixels[i+2])/3)) > 14 && (r + g + b) > 80);
+
+            if (isSkin) {
+              const px = (i / 4) % 64;
+              const py = Math.floor((i / 4) / 64);
+              if (px < skinMinX) skinMinX = px;
+              if (px > skinMaxX) skinMaxX = px;
+              if (py < skinMinY) skinMinY = py;
+              if (py > skinMaxY) skinMaxY = py;
+              skinCount++;
+            }
+          }
+
+          let isCandidate = false;
+
+          // Forgiving threshold: hand has at least 8 pixels (works at standard desktop distance)
+          if (skinCount >= 8 && (skinMaxY - skinMinY) >= 5 && (skinMaxX - skinMinX) >= 4) {
+            const handH = skinMaxY - skinMinY + 1;
+            const handW = skinMaxX - skinMinX + 1;
+            const topBoundary = skinMinY + Math.max(2, Math.floor(handH * 0.40));
+
+            let topPixels = 0;
+            let bottomPixels = 0;
+            let topMinX = 64, topMaxX = 0;
+            let bottomMinX = 64, bottomMaxX = 0;
+
+            for (let y = skinMinY; y <= skinMaxY; y++) {
+              for (let x = skinMinX; x <= skinMaxX; x++) {
+                const idx = (y * 64 + x) * 4;
+                const r = data[idx], g = data[idx+1], b = data[idx+2];
+                const isSkin = (r > 35 && g > 15 && b > 10 && r > b && (r >= g - 12)) ||
+                               (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[idx]+prevPixels[idx+1]+prevPixels[idx+2])/3)) > 14 && (r + g + b) > 80);
+                if (isSkin) {
+                  if (y <= topBoundary) {
+                    topPixels++;
+                    if (x < topMinX) topMinX = x;
+                    if (x > topMaxX) topMaxX = x;
+                  } else {
+                    bottomPixels++;
+                    if (x < bottomMinX) bottomMinX = x;
+                    if (x > bottomMaxX) bottomMaxX = x;
+                  }
+                }
+              }
+            }
+
+            const topW = topMaxX >= topMinX ? (topMaxX - topMinX + 1) : 0;
+            const bottomW = bottomMaxX >= bottomMinX ? (bottomMaxX - bottomMinX + 1) : 0;
+
+            // Low-threshold Thumbs Up Criteria:
+            // Upright or compact hand with top thumb protrusion and bottom palm/fist mass
+            if (topPixels >= 2 && bottomPixels >= 4 && handH >= handW * 0.50 && topW <= (bottomW * 1.35 + 2)) {
+              isCandidate = true;
+            }
+          }
+
+          // Leaky integrator: fast attack (+2), slow decay (-1) -> instant 1-frame trigger, zero flicker!
+          if (isCandidate) {
+            thumbsUpCounterRef.current = Math.min(4, thumbsUpCounterRef.current + 2);
+          } else {
+            thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
+          }
+
+          const thumbsUpActive = thumbsUpCounterRef.current >= 2;
+          setIsThumbsUp(thumbsUpActive);
+
+          // In IDLE: Cast rod when Thumbs Up is recognized!
+          if (thumbsUpActive && stage === 'IDLE') {
+            handleCast();
+          }
+        } else {
+          thumbsUpCounterRef.current = 0;
+          setIsThumbsUp(false);
         }
       }
 
@@ -1021,6 +1110,21 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               </div>
             )}
 
+            {/* Low-Threshold Thumbs Up Gesture Prompt */}
+            <div className={`p-2.5 border transition-all duration-150 ${
+              isThumbsUp 
+                ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_20px_#10b981]' 
+                : 'bg-black/60 border-zinc-700/80 text-zinc-300'
+            }`}>
+              <div className="font-arcade text-xs flex items-center justify-center gap-2">
+                <span className="text-xl">👍</span>
+                <span>{isThumbsUp ? 'ЖЕСТ «ЛАЙК» РАСПОЗНАН! ЗАБРОС...' : 'ПОКАЖИТЕ «ЛАЙК» В КАМЕРУ ДЛЯ ЗАБРОСА'}</span>
+              </div>
+              <div className="font-mono text-[8px] text-zinc-400 mt-0.5">
+                Или нажмите кнопку ниже / клавишу [Пробел]
+              </div>
+            </div>
+
             <button
               onClick={handleCast}
               className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs tracking-wider border-2 border-emerald-300 shadow-[0_3px_0_#064e3b] transition-all cursor-pointer"
@@ -1461,7 +1565,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <Camera className="w-3.5 h-3.5 text-emerald-400" />
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
-          <div><span className="text-cyan-400">[ЗАБРОС]</span> Кнопка «ЗАБРОСИТЬ УДОЧКУ» мышью</div>
+          <div><span className="text-cyan-400">[ЗАБРОС]</span> Жест «Лайк» (👍) в камеру или кнопка мышью</div>
           <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру (окно 0.75 сек)</div>
           <div><span className="text-red-400">[ОШИБКА]</span> Рывок раньше поклевки = фальстарт (штраф 2 сек)</div>
           <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
@@ -1476,8 +1580,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className={`w-1.5 h-1.5 rounded-full ${cameraStatus === 'ACTIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                 <span>ВЕБ-КАМЕРА</span>
               </div>
-              <div className={cameraStatus === 'ACTIVE' ? 'text-zinc-300' : 'text-amber-400'}>
-                {cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
+              <div className={isThumbsUp ? 'text-emerald-400 font-bold animate-pulse' : cameraStatus === 'ACTIVE' ? 'text-zinc-300' : 'text-amber-400'}>
+                {isThumbsUp ? '👍 ЛАЙК' : cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
               </div>
             </div>
 
@@ -1489,6 +1593,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 muted
                 className="w-full h-full object-cover transform -scale-x-100"
               />
+
+              {/* Thumbs Up Detected Badge Overlay */}
+              {isThumbsUp && (
+                <div className="absolute top-1 left-1 bg-emerald-950/90 border border-emerald-400 px-1.5 py-0.5 rounded font-arcade text-[8px] text-emerald-300 animate-pulse shadow-[0_0_10px_#10b981] z-20 flex items-center gap-1">
+                  <span>👍</span>
+                  <span>ЛАЙК</span>
+                </div>
+              )}
 
               {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
               {cameraStatus === 'ACTIVE' && (
