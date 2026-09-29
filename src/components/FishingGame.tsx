@@ -302,7 +302,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
           for (let i = 0; i < data.length; i += 4) {
             const r = data[i], g = data[i+1], b = data[i+2];
-            const isSkin = r > 50 && g > 28 && b > 18 && r > g && (r - b) > 10 && (r - g) > 5;
+            // Broad, adaptive skin & active motion foreground detection
+            const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
+                           (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[i]+prevPixels[i+1]+prevPixels[i+2])/3)) > 16 && (r + g + b) > 90);
             if (isSkin) {
               const px = (i / 4) % 64;
               const py = Math.floor((i / 4) / 64);
@@ -315,12 +317,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           }
 
           let isThumbsUpFrame = false;
-          // Must have substantial skin pixels and realistic hand box
-          if (skinCount >= 32 && (handMaxY - handMinY) >= 12 && (handMaxX - handMinX) >= 9) {
+          // Responsive hand detection (at normal webcam distance 18-35px)
+          if (skinCount >= 18 && (handMaxY - handMinY) >= 8 && (handMaxX - handMinX) >= 6) {
             const handH = handMaxY - handMinY + 1;
             const handW = handMaxX - handMinX + 1;
-            // The thumb region is the top 32%
-            const thumbCutoffY = handMinY + Math.floor(handH * 0.32);
+            // The thumb region is the top 38%
+            const thumbCutoffY = handMinY + Math.floor(handH * 0.38);
 
             let thumbPixels = 0;
             let thumbMinX = 64, thumbMaxX = 0;
@@ -332,7 +334,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               for (let x = handMinX; x <= handMaxX; x++) {
                 const idx = (y * 64 + x) * 4;
                 const r = data[idx], g = data[idx+1], b = data[idx+2];
-                const isSkin = r > 50 && g > 28 && b > 18 && r > g && (r - b) > 10 && (r - g) > 5;
+                const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
+                               (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[idx]+prevPixels[idx+1]+prevPixels[idx+2])/3)) > 16 && (r + g + b) > 90);
                 if (isSkin) {
                   if (y <= thumbCutoffY) {
                     thumbPixels++;
@@ -355,32 +358,32 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             const fistMidX = (fistMinX + fistMaxX) / 2;
             const thumbMidX = (thumbMinX + thumbMaxX) / 2;
 
-            // STRICT THUMBS UP RULES (Excludes Index Finger ☝️):
-            // 1. LATERAL THUMB: Thumb must stick out on the left or right side of the fist
-            const isLateral = fistWidth > 0 && Math.abs(thumbMidX - fistMidX) >= fistWidth * 0.16;
+            // ADAPTIVE THUMBS UP RULES (Excludes Index Finger ☝️, easily accepts natural 👍):
+            // 1. LATERAL THUMB: Thumb is on outer flank or offset from fist center
+            const isLateral = fistWidth > 0 && (Math.abs(thumbMidX - fistMidX) >= fistWidth * 0.08 || thumbMinX <= fistMinX + 1 || thumbMaxX >= fistMaxX - 1);
 
-            // 2. FIST HEAVINESS: The fist is a clenched ball with at least 2.2x the thumb mass
-            const isFistBulky = fistPixels >= 26 && fistPixels >= thumbPixels * 2.2;
+            // 2. FIST HEAVINESS: Fist has at least 1.35x thumb mass (index finger usually has 0.8x-1.1x)
+            const isFistBulky = fistPixels >= 12 && fistPixels >= thumbPixels * 1.35;
 
-            // 3. THUMB STUBBINESS: Thumb is wide (>=3px) and NOT slender like a long index finger
-            const isThumbStubby = thumbWidth >= 3 && thumbWidth <= fistWidth * 0.60 && (thumbHeight / (thumbWidth || 1) <= 2.2);
+            // 3. THUMB STUBBINESS: Thumb is wide enough (>=2px) and NOT razor-thin needle
+            const isThumbStubby = thumbWidth >= 2 && thumbWidth <= fistWidth * 0.78 && (thumbHeight / (thumbWidth || 1) <= 2.6);
 
-            // 4. BALANCED ASPECT RATIO: Hand box is not overly elongated
-            const isAspectValid = handH >= handW * 0.82 && handH <= handW * 1.55;
+            // 4. NATURAL ASPECT RATIO:
+            const isAspectValid = handH >= handW * 0.70 && handH <= handW * 1.95;
 
-            if (thumbPixels >= 6 && isLateral && isFistBulky && isThumbStubby && isAspectValid) {
+            if (thumbPixels >= 4 && isLateral && isFistBulky && isThumbStubby && isAspectValid) {
               isThumbsUpFrame = true;
             }
           }
 
           if (isThumbsUpFrame) {
-            thumbsUpCounterRef.current = Math.min(8, thumbsUpCounterRef.current + 1);
+            thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 1);
           } else {
             thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
           }
 
-          // Require 4 consecutive frames (~180ms) for rock-solid confirmation
-          const isThumbsUpActive = thumbsUpCounterRef.current >= 4;
+          // Require 2 consecutive frames (~90ms) for responsive, natural feel
+          const isThumbsUpActive = thumbsUpCounterRef.current >= 2;
           setIsThumbsUp(isThumbsUpActive);
 
           // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
