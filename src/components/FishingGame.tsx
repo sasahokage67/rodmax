@@ -11,8 +11,6 @@ import {
   HelpCircle, 
   X, 
   Activity, 
-  Smartphone, 
-  Monitor, 
   Hand,
   Volume2,
   AlertTriangle,
@@ -39,14 +37,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
 
-  // Layout Orientation: 'horizontal' for PC/desktop, 'vertical' for mobile/phone
-  const [isMobile, setIsMobile] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.innerWidth < 768 || window.innerHeight > window.innerWidth;
-  });
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'horizontal' | 'vertical'>('auto');
-  const activeLayout = layoutMode === 'auto' ? (isMobile ? 'vertical' : 'horizontal') : layoutMode;
-
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [controlWarning, setControlWarning] = useState<string | null>(null);
@@ -56,16 +46,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [cameraStatus, setCameraStatus] = useState<'ACTIVE' | 'CONNECTING' | 'DENIED' | 'OFF'>('CONNECTING');
   const [motionIntensity, setMotionIntensity] = useState(0);
 
-  // 2D Coordinates for Fish & Player Hand / Finger inside the Camera Catch Arena
+  // 2D Coordinates for Fish & Player Hand inside the Camera Catch Arena
   const [fishPos, setFishPos] = useState<Position2D>({ x: 50, y: 50 });
   const [handPos, setHandPos] = useState<Position2D>({ x: 50, y: 50 });
   const [isLockedOn, setIsLockedOn] = useState(false);
   const [catchProgress, setCatchProgress] = useState(50); // Starts midway (50%)
   const [screenShake, setScreenShake] = useState(false);
-
-  // Touch / Finger Direct Control State (for phone/touch)
-  const [touchPos, setTouchPos] = useState<Position2D | null>(null);
-  const [touchActive, setTouchActive] = useState(false);
 
   // Guard refs to prevent duplicate catch bug!
   const isRoundFinishedRef = useRef(false);
@@ -76,7 +62,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const fishTargetRef = useRef<Position2D>({ x: 50, y: 50 });
   const fishTimerRef = useRef(0);
   const handPosRef = useRef<Position2D>({ x: 50, y: 50 });
-  const touchPosRef = useRef<Position2D | null>(null);
   const lastWarningSoundTime = useRef(0);
   const currentProgressRef = useRef(50);
 
@@ -117,19 +102,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   const diffParams = getFishDifficultyParams(targetFish);
 
-  // Detect orientation / resize
-  useEffect(() => {
-    const handleResize = () => {
-      const mobileNow = window.innerWidth < 768 || window.innerHeight > window.innerWidth;
-      setIsMobile(mobileNow);
-    };
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-    };
-  }, []);
 
   // 1. Initialize Webcam Stream
   useEffect(() => {
@@ -290,13 +262,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     fishPosRef.current = { x: 50, y: 50 };
     fishTargetRef.current = { x: 50, y: 50 };
     fishTimerRef.current = 0;
-    touchPosRef.current = null;
     currentProgressRef.current = 50;
 
     setFishPos({ x: 50, y: 50 });
     setCatchProgress(50); // Starts comfortably midway at 50%
-    setTouchPos(null);
-    setTouchActive(false);
     setIsLockedOn(false);
     setControlWarning(null);
     setStage('REELING');
@@ -334,15 +303,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         y: Math.round(fishPosRef.current.y * 10) / 10
       });
 
-      // 2. ACTIVE PLAYER POSITION (Hand from Camera on PC, or Touch Finger on Phone)
-      let activePlayerPos: Position2D;
-      if (touchPosRef.current !== null) {
-        // Touch on screen takes priority if user is using finger
-        activePlayerPos = touchPosRef.current;
-      } else {
-        // Otherwise Webcam Hand Tracking
-        activePlayerPos = handPosRef.current;
-      }
+      // 2. ACTIVE PLAYER POSITION (Exclusively Webcam Hand Tracking)
+      const activePlayerPos: Position2D = handPosRef.current;
 
       // 3. LOCK-ON DISTANCE CHECK
       const distX = activePlayerPos.x - fishPosRef.current.x;
@@ -419,45 +381,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       return;
     }
     if (stage === 'REELING') {
-      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-        updateTouchCoords(e.clientX, e.clientY);
-      } else {
-        // Mouse clicked on PC: remind player to put hand in front of the camera
-        setControlWarning('✋ МЫШЬ ОТКЛЮЧЕНА! ПОМЕСТИТЕ РУКУ В КАМЕРУ И ДЕРЖИТЕ НА РЫБЕ!');
-        setTimeout(() => setControlWarning(null), 2500);
-      }
+      // Screen tapped or clicked: remind player that controls are 100% via camera gestures
+      setControlWarning('✋ УПРАВЛЕНИЕ ТОЛЬКО ЧЕРЕЗ КАМЕРУ! НАВЕДИТЕ ЛАДОНЬ НА РЫБУ В ОБЪЕКТИВЕ!');
+      setTimeout(() => setControlWarning(null), 2500);
     }
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (stage === 'REELING' && touchActive && (e.pointerType === 'touch' || e.pointerType === 'pen')) {
-      updateTouchCoords(e.clientX, e.clientY);
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (stage === 'REELING') {
-      try {
-        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-      } catch {
-        // ignore
-      }
-      touchPosRef.current = null;
-      setTouchPos(null);
-      setTouchActive(false);
-    }
-  };
-
-  const updateTouchCoords = (clientX: number, clientY: number) => {
-    if (!arenaRef.current) return;
-    const rect = arenaRef.current.getBoundingClientRect();
-    const x = Math.max(5, Math.min(95, ((clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(5, Math.min(95, ((clientY - rect.top) / rect.height) * 100));
-    const pos = { x: Math.round(x), y: Math.round(y) };
-    touchPosRef.current = pos;
-    setTouchPos(pos);
-    setTouchActive(true);
   };
 
   // Catch Success (Strictly once per round!)
@@ -585,27 +512,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {/* Right: Layout Switcher, Camera Toggle & Angler Info */}
         <div className="flex items-center gap-2 sm:gap-3">
           
-          {/* Mode Switcher */}
-          <button
-            onClick={() => {
-              sound.playReelClick();
-              setLayoutMode(activeLayout === 'horizontal' ? 'vertical' : 'horizontal');
-            }}
-            className="py-1 px-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-arcade text-[8px] sm:text-[9px] flex items-center gap-1 transition-colors"
-            title="Переключить горизонтальный режим (ПК) / вертикальный режим (Телефон)"
-          >
-            {activeLayout === 'horizontal' ? (
-              <>
-                <Monitor className="w-3 h-3 text-cyan-400" />
-                <span>РЕЖИМ: ПК (КАМЕРА)</span>
-              </>
-            ) : (
-              <>
-                <Smartphone className="w-3 h-3 text-emerald-400" />
-                <span>РЕЖИМ: ТЕЛЕФОН (ТАЧ)</span>
-              </>
-            )}
-          </button>
 
           {/* Camera Toggle Button */}
           <button
@@ -681,7 +587,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </button>
             
             <div className="text-[9px] font-arcade text-cyan-300">
-              {activeLayout === 'vertical' ? '📱 ТЕЛЕФОН: УПРАВЛЕНИЕ ПАЛЬЦЕМ' : '✋ ПК: УПРАВЛЕНИЕ ДВИЖЕНИЕМ РУКИ ПЕРЕД ВЕБ-КАМЕРОЙ'}
+              ✋ УПРАВЛЕНИЕ ДВИЖЕНИЕМ РУКИ ПЕРЕД ВЕБ-КАМЕРОЙ
             </div>
           </div>
         )}
@@ -772,18 +678,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   ? 'bg-emerald-950 text-emerald-300 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
                   : 'bg-amber-950/80 text-amber-300 border-amber-500 animate-pulse'
               }`}>
-                {activeLayout === 'horizontal' ? (
-                  isLockedOn ? (
-                    <span>🎯 ЗАХВАТ! ДЕРЖИТЕ РУКУ НА РЫБЕ В КАДРЕ (+100%)</span>
-                  ) : (
-                    <span>✋ ПОМЕСТИТЕ РУКУ В КАМЕРУ И НАВЕДИТЕ ЕЁ НА РЫБУ!</span>
-                  )
+                {isLockedOn ? (
+                  <span>🎯 ЗАХВАТ! ДЕРЖИТЕ РУКУ НА РЫБЕ В КАДРЕ КАМЕРЫ (+100%)</span>
                 ) : (
-                  isLockedOn ? (
-                    <span>🎯 ЗАХВАТ! ВЕДИТЕ ПАЛЬЦЕМ ПРЯМО ЗА РЫБОЙ (+100%)</span>
-                  ) : (
-                    <span>👆 ПРИЖМИТЕ ПАЛЕЦ К ЭКРАНУ И НАВЕДИТЕ НА РЫБУ!</span>
-                  )
+                  <span>✋ ПОМЕСТИТЕ РУКУ В КАМЕРУ И НАВЕДИТЕ ЕЁ НА РЫБУ!</span>
                 )}
               </div>
 
@@ -791,8 +689,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div 
                 ref={arenaRef}
                 onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
                 className="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-black border-2 border-emerald-500 overflow-hidden shadow-inner select-none touch-none"
                 style={{ touchAction: 'none' }}
               >
@@ -858,8 +754,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </div>
                 </div>
 
-                {/* 3. PLAYER'S HAND RETICLE (Calculated from Webcam optical tracker) */}
-                {cameraStatus === 'ACTIVE' && touchPos === null && (
+                {/* 3. PLAYER'S HAND RETICLE (Webcam optical tracker) */}
+                {cameraStatus === 'ACTIVE' && (
                   <div 
                     className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 flex flex-col items-center justify-center z-20"
                     style={{
@@ -871,25 +767,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                       <Hand className="w-5 h-5 text-cyan-300 animate-pulse" />
                     </div>
                     <div className="px-1.5 py-0.5 bg-black/90 border border-cyan-400 font-arcade text-[7px] text-cyan-300 mt-1">
-                      ВАША РУКА
-                    </div>
-                  </div>
-                )}
-
-                {/* 4. PLAYER'S FINGER RETICLE (On mobile touch screens) */}
-                {touchPos !== null && (
-                  <div 
-                    className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 flex flex-col items-center justify-center z-20"
-                    style={{
-                      left: `${touchPos.x}%`,
-                      top: `${touchPos.y}%`
-                    }}
-                  >
-                    <div className="w-12 h-12 rounded-full border-2 border-cyan-400 bg-cyan-400/30 shadow-[0_0_20px_#22d3ee] flex items-center justify-center text-sm">
-                      👆
-                    </div>
-                    <div className="px-1.5 py-0.5 bg-black/90 border border-cyan-400 font-arcade text-[7px] text-cyan-300 mt-1">
-                      ПАЛЕЦ
+                      ЛАДОНЬ В КАМЕРЕ
                     </div>
                   </div>
                 )}
@@ -899,11 +777,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Arena Footer Info */}
               <div className="flex justify-between items-center text-[8px] sm:text-[9px] font-mono text-zinc-400 pt-1">
                 <div>
-                  {activeLayout === 'horizontal' ? (
-                    <span>💡 <strong className="text-white">Совет:</strong> держите ладонь в поле зрения камеры и перемещайте прямо за кругом рыбы.</span>
-                  ) : (
-                    <span>💡 <strong className="text-white">Совет:</strong> коснитесь пальцем круга рыбы и ведите им следом за ней.</span>
-                  )}
+                  <span>💡 <strong className="text-white">Совет:</strong> держите ладонь в поле зрения камеры и перемещайте прямо за кругом рыбы.</span>
                 </div>
                 <div className={`px-2 py-0.5 font-arcade ${
                   isLockedOn ? 'text-emerald-400' : 'text-amber-400'
@@ -1115,7 +989,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     РУКОВОДСТВО РЫБОЛОВА RODMAX
                   </h3>
                   <p className="font-mono text-[10px] text-zinc-400 mt-0.5">
-                    Управление «Рука на рыбе»: веб-камера на ПК и палец на смартфоне
+                    Управление оптическими жестами веб-камеры / Правила глубоководного вываживания
                   </p>
                 </div>
               </div>
@@ -1136,9 +1010,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   1
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА НА ПК ИЛИ ПАЛЕЦ НА ТЕЛЕФОНЕ</h4>
+                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА (60 FPS)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    RODMAX работает через прямое физическое взаимодействие. На компьютере вы управляете положением своей ладони в окне веб-камеры, а на телефоне — пальцем по экрану.
+                    RODMAX полностью управляется оптическим трекингом веб-камеры. Разрешите доступ к камере в браузере, чтобы управлять забросом, подсечкой и вываживанием движениями ладони.
                   </p>
                 </div>
               </div>
@@ -1150,7 +1024,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-white">ЗАБРОС СНАСТИ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Сделайте взмах рукой вверх перед камерой или нажмите кнопку «Забросить удочку». Снасть уйдет на океанскую глубину.
+                    Сделайте плавный взмах ладонью вверх перед камерой или нажмите экранную кнопку «Забросить удочку». Снасть уйдет на океанскую глубину.
                   </p>
                 </div>
               </div>
@@ -1162,7 +1036,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-amber-300">ПОДСЕЧКА (! КЛЮЕТ !)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Когда раздастся резкий сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или нажмите кнопку «Подсечь рыбу».
+                    Когда раздастся звуковой сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или нажмите экранную кнопку «Подсечь рыбу».
                   </p>
                 </div>
               </div>
@@ -1174,7 +1048,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ: «РУКА НА РЫБЕ»</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    В окне арены плавает рыба в круге цели. <strong className="text-white">На ПК:</strong> поместите ладонь в кадр камеры и держите маркер ладони прямо на рыбе. <strong className="text-white">На смартфоне:</strong> прижмите палец к рыбе и ведите за ней. Шкала вываживания будет быстро расти до 100%!
+                    В окне арены плавает рыба в круге цели. Поместите ладонь в кадр камеры и держите маркер ладони прямо на рыбе. Шкала вываживания быстро вырастет до 100%!
                   </p>
                 </div>
               </div>
