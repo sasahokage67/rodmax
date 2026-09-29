@@ -51,9 +51,13 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [handPos, setHandPos] = useState<Position2D>({ x: 50, y: 50 });
   const [isLockedOn, setIsLockedOn] = useState(false);
   const [catchProgress, setCatchProgress] = useState(50);
-  const [screenShake, setScreenShake] = useState(false);
   const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
   const [lostReason, setLostReason] = useState<string | null>(null);
+
+  // Performance & Video refs
+  const arenaVideoRef = useRef<HTMLVideoElement>(null);
+  const lastReelClickTimeRef = useRef(0);
+  const lastReportedMotionRef = useRef(0);
 
   // Thumbs Up (👍) Gesture State
   const [isThumbsUp, setIsThumbsUp] = useState(false);
@@ -190,13 +194,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     };
   }, [cameraEnabled]);
 
-  // Ensure webcam video element gets the stream attached as soon as it mounts
+  // Ensure webcam video elements get the stream attached as soon as they mount
   useEffect(() => {
     if (webcamVideoRef.current && mediaStreamRef.current && webcamVideoRef.current.srcObject !== mediaStreamRef.current) {
       webcamVideoRef.current.srcObject = mediaStreamRef.current;
       webcamVideoRef.current.play().catch(() => {});
     }
-  }, [cameraStatus, cameraEnabled]);
+    if (arenaVideoRef.current && mediaStreamRef.current && arenaVideoRef.current.srcObject !== mediaStreamRef.current) {
+      arenaVideoRef.current.srcObject = mediaStreamRef.current;
+      arenaVideoRef.current.play().catch(() => {});
+    }
+  }, [cameraStatus, cameraEnabled, stage]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -268,7 +276,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         const avgMotion = Math.min(100, Math.floor(diffSum / 120));
-        setMotionIntensity(avgMotion);
+        if (Math.abs(avgMotion - lastReportedMotionRef.current) >= 4) {
+          lastReportedMotionRef.current = avgMotion;
+          setMotionIntensity(avgMotion);
+        }
 
         if (motionPoints > 10) {
           // Centroid coordinates (mirrored X)
@@ -296,102 +307,106 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             y: Math.round(handPosRef.current.y)
           });
 
-          // Geometric Thumbs Up (👍) analysis:
-          let handMinX = 64, handMaxX = 0, handMinY = 48, handMaxY = 0;
-          let skinCount = 0;
+          // Geometric Thumbs Up (👍) analysis ONLY when casting is possible (saves CPU during REELING):
+          const canCastWithThumbsUp = (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST');
+          if (canCastWithThumbsUp) {
+            let handMinX = 64, handMaxX = 0, handMinY = 48, handMaxY = 0;
+            let skinCount = 0;
 
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i+1], b = data[i+2];
-            // Broad, adaptive skin & active motion foreground detection
-            const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
-                           (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[i]+prevPixels[i+1]+prevPixels[i+2])/3)) > 16 && (r + g + b) > 90);
-            if (isSkin) {
-              const px = (i / 4) % 64;
-              const py = Math.floor((i / 4) / 64);
-              if (px < handMinX) handMinX = px;
-              if (px > handMaxX) handMaxX = px;
-              if (py < handMinY) handMinY = py;
-              if (py > handMaxY) handMaxY = py;
-              skinCount++;
-            }
-          }
-
-          let isThumbsUpFrame = false;
-          // Responsive hand detection (at normal webcam distance 18-35px)
-          if (skinCount >= 18 && (handMaxY - handMinY) >= 8 && (handMaxX - handMinX) >= 6) {
-            const handH = handMaxY - handMinY + 1;
-            const handW = handMaxX - handMinX + 1;
-            // The thumb region is the top 38%
-            const thumbCutoffY = handMinY + Math.floor(handH * 0.38);
-
-            let thumbPixels = 0;
-            let thumbMinX = 64, thumbMaxX = 0;
-            let thumbMinY = 48, thumbMaxY = 0;
-            let fistPixels = 0;
-            let fistMinX = 64, fistMaxX = 0;
-
-            for (let y = handMinY; y <= handMaxY; y++) {
-              for (let x = handMinX; x <= handMaxX; x++) {
-                const idx = (y * 64 + x) * 4;
-                const r = data[idx], g = data[idx+1], b = data[idx+2];
-                const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
-                               (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[idx]+prevPixels[idx+1]+prevPixels[idx+2])/3)) > 16 && (r + g + b) > 90);
-                if (isSkin) {
-                  if (y <= thumbCutoffY) {
-                    thumbPixels++;
-                    if (x < thumbMinX) thumbMinX = x;
-                    if (x > thumbMaxX) thumbMaxX = x;
-                    if (y < thumbMinY) thumbMinY = y;
-                    if (y > thumbMaxY) thumbMaxY = y;
-                  } else {
-                    fistPixels++;
-                    if (x < fistMinX) fistMinX = x;
-                    if (x > fistMaxX) fistMaxX = x;
-                  }
-                }
+            for (let i = 0; i < data.length; i += 4) {
+              const r = data[i], g = data[i+1], b = data[i+2];
+              // Broad, adaptive skin & active motion foreground detection
+              const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
+                             (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[i]+prevPixels[i+1]+prevPixels[i+2])/3)) > 16 && (r + g + b) > 90);
+              if (isSkin) {
+                const px = (i / 4) % 64;
+                const py = Math.floor((i / 4) / 64);
+                if (px < handMinX) handMinX = px;
+                if (px > handMaxX) handMaxX = px;
+                if (py < handMinY) handMinY = py;
+                if (py > handMaxY) handMaxY = py;
+                skinCount++;
               }
             }
 
-            const thumbWidth = thumbMaxX >= thumbMinX ? (thumbMaxX - thumbMinX + 1) : 0;
-            const thumbHeight = thumbMaxY >= thumbMinY ? (thumbMaxY - thumbMinY + 1) : 0;
-            const fistWidth = fistMaxX >= fistMinX ? (fistMaxX - fistMinX + 1) : 0;
-            const fistMidX = (fistMinX + fistMaxX) / 2;
-            const thumbMidX = (thumbMinX + thumbMaxX) / 2;
+            let isThumbsUpFrame = false;
+            // Responsive hand detection (at normal webcam distance 18-35px)
+            if (skinCount >= 18 && (handMaxY - handMinY) >= 8 && (handMaxX - handMinX) >= 6) {
+              const handH = handMaxY - handMinY + 1;
+              const handW = handMaxX - handMinX + 1;
+              // The thumb region is the top 38%
+              const thumbCutoffY = handMinY + Math.floor(handH * 0.38);
 
-            // ADAPTIVE THUMBS UP RULES (Excludes Index Finger ☝️, easily accepts natural 👍):
-            // 1. LATERAL THUMB: Thumb is on outer flank or offset from fist center
-            const isLateral = fistWidth > 0 && (Math.abs(thumbMidX - fistMidX) >= fistWidth * 0.08 || thumbMinX <= fistMinX + 1 || thumbMaxX >= fistMaxX - 1);
+              let thumbPixels = 0;
+              let thumbMinX = 64, thumbMaxX = 0;
+              let thumbMinY = 48, thumbMaxY = 0;
+              let fistPixels = 0;
+              let fistMinX = 64, fistMaxX = 0;
 
-            // 2. FIST HEAVINESS: Fist has at least 1.35x thumb mass (index finger usually has 0.8x-1.1x)
-            const isFistBulky = fistPixels >= 12 && fistPixels >= thumbPixels * 1.35;
+              for (let y = handMinY; y <= handMaxY; y++) {
+                for (let x = handMinX; x <= handMaxX; x++) {
+                  const idx = (y * 64 + x) * 4;
+                  const r = data[idx], g = data[idx+1], b = data[idx+2];
+                  const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 6 && (r - b) > 4) ||
+                                 (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[idx]+prevPixels[idx+1]+prevPixels[idx+2])/3)) > 16 && (r + g + b) > 90);
+                  if (isSkin) {
+                    if (y <= thumbCutoffY) {
+                      thumbPixels++;
+                      if (x < thumbMinX) thumbMinX = x;
+                      if (x > thumbMaxX) thumbMaxX = x;
+                      if (y < thumbMinY) thumbMinY = y;
+                      if (y > thumbMaxY) thumbMaxY = y;
+                    } else {
+                      fistPixels++;
+                      if (x < fistMinX) fistMinX = x;
+                      if (x > fistMaxX) fistMaxX = x;
+                    }
+                  }
+                }
+              }
 
-            // 3. THUMB STUBBINESS: Thumb is wide enough (>=2px) and NOT razor-thin needle
-            const isThumbStubby = thumbWidth >= 2 && thumbWidth <= fistWidth * 0.78 && (thumbHeight / (thumbWidth || 1) <= 2.6);
+              const thumbWidth = thumbMaxX >= thumbMinX ? (thumbMaxX - thumbMinX + 1) : 0;
+              const thumbHeight = thumbMaxY >= thumbMinY ? (thumbMaxY - thumbMinY + 1) : 0;
+              const fistWidth = fistMaxX >= fistMinX ? (fistMaxX - fistMinX + 1) : 0;
+              const fistMidX = (fistMinX + fistMaxX) / 2;
+              const thumbMidX = (thumbMinX + thumbMaxX) / 2;
 
-            // 4. NATURAL ASPECT RATIO:
-            const isAspectValid = handH >= handW * 0.70 && handH <= handW * 1.95;
+              // ADAPTIVE THUMBS UP RULES (Excludes Index Finger ☝️, easily accepts natural 👍):
+              // 1. LATERAL THUMB: Thumb is on outer flank or offset from fist center
+              const isLateral = fistWidth > 0 && (Math.abs(thumbMidX - fistMidX) >= fistWidth * 0.08 || thumbMinX <= fistMinX + 1 || thumbMaxX >= fistMaxX - 1);
 
-            if (thumbPixels >= 4 && isLateral && isFistBulky && isThumbStubby && isAspectValid) {
-              isThumbsUpFrame = true;
+              // 2. FIST HEAVINESS: Fist has at least 1.35x thumb mass (index finger usually has 0.8x-1.1x)
+              const isFistBulky = fistPixels >= 12 && fistPixels >= thumbPixels * 1.35;
+
+              // 3. THUMB STUBBINESS: Thumb is wide enough (>=2px) and NOT razor-thin needle
+              const isThumbStubby = thumbWidth >= 2 && thumbWidth <= fistWidth * 0.78 && (thumbHeight / (thumbWidth || 1) <= 2.6);
+
+              // 4. NATURAL ASPECT RATIO:
+              const isAspectValid = handH >= handW * 0.70 && handH <= handW * 1.95;
+
+              if (thumbPixels >= 4 && isLateral && isFistBulky && isThumbStubby && isAspectValid) {
+                isThumbsUpFrame = true;
+              }
+            }
+
+            if (isThumbsUpFrame) {
+              thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 1);
+            } else {
+              thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
+            }
+
+            // Require 2 consecutive frames (~90ms) for responsive, natural feel
+            const isThumbsUpActive = thumbsUpCounterRef.current >= 2;
+            setIsThumbsUp(isThumbsUpActive);
+
+            // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
+            if (isThumbsUpActive && (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST')) {
+              handleCast();
             }
           }
 
-          if (isThumbsUpFrame) {
-            thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 1);
-          } else {
-            thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
-          }
-
-          // Require 2 consecutive frames (~90ms) for responsive, natural feel
-          const isThumbsUpActive = thumbsUpCounterRef.current >= 2;
-          setIsThumbsUp(isThumbsUpActive);
-
-          // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
-          if (isThumbsUpActive && (stage === 'IDLE' || stage === 'CATCH_SUCCESS')) {
-            handleCast();
-          } 
           // 2. FAULT TRIGGER: Early twitch in WAITING stage scares fish
-          else if (stage === 'WAITING' && avgMotion > 16) {
+          if (stage === 'WAITING' && avgMotion > 16) {
             triggerEarlyFoul();
           }
           // 3. STRIKE: Ultra-low latency strike trigger in BITE stage
@@ -406,7 +421,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       }
 
       prevPixels = new Uint8ClampedArray(data);
-    }, 20);
+    }, 30);
 
     return () => clearInterval(interval);
   }, [cameraStatus, stage]);
@@ -676,11 +691,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       // 6. PROGRESS CALCULATION (Smooth decimal fill)
       if (isLocked) {
-        setScreenShake(false);
-        sound.playReelClick();
+        if (now - lastReelClickTimeRef.current >= 180) {
+          sound.playReelClick();
+          lastReelClickTimeRef.current = now;
+        }
         currentProgressRef.current = Math.min(100, currentProgressRef.current + diffParams.gain);
       } else {
-        setScreenShake(true);
         if (now - lastWarningSoundTime.current > 420) {
           sound.playWarning();
           lastWarningSoundTime.current = now;
@@ -895,9 +911,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   return (
     <div 
-      className={`relative w-full h-[calc(100vh-65px)] bg-black overflow-hidden select-none flex flex-col justify-between ${
-        screenShake ? 'animate-shake' : ''
-      }`}
+      className="relative w-full h-[calc(100vh-65px)] bg-black overflow-hidden select-none flex flex-col justify-between"
     >
       {/* Hidden Motion Detection Canvas */}
       <canvas ref={motionCanvasRef} className="hidden" />
@@ -1203,7 +1217,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </div>
                   <div className="w-full h-3.5 bg-black border border-emerald-500 p-0.5 overflow-hidden">
                     <div 
-                      className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-[width] duration-75 ease-linear"
+                      className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-none"
                       style={{ width: `${Math.min(100, Math.max(0, catchProgress)).toFixed(1)}%` }}
                     />
                   </div>
@@ -1221,7 +1235,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </div>
                   <div className="w-full h-2 bg-black border border-zinc-700 p-0.5 overflow-hidden">
                     <div 
-                      className={`h-full transition-[width] duration-75 ease-linear ${
+                      className={`h-full transition-none ${
                         offTargetMs > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : offTargetMs > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
                       }`}
                       style={{ width: `${Math.min(100, (offTargetMs / 1500) * 100).toFixed(1)}%` }}
@@ -1231,7 +1245,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               </div>
 
               {/* TECHNIQUE INSTRUCTION BADGE */}
-              <div className={`p-2 font-arcade text-[9px] sm:text-[10px] text-center border transition-all ${
+              <div className={`p-2 font-arcade text-[9px] sm:text-[10px] text-center border transition-colors duration-150 ${
                 isLockedOn 
                   ? 'bg-emerald-950 text-emerald-300 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
                   : 'bg-amber-950/80 text-amber-300 border-amber-500 animate-pulse'
@@ -1253,20 +1267,15 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 {/* 1. Live Webcam Feed in the Arena (Mirrored) */}
                 {cameraEnabled && cameraStatus === 'ACTIVE' ? (
                   <video
-                    ref={(el) => {
-                      if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
-                        el.srcObject = mediaStreamRef.current;
-                        el.play().catch(() => {});
-                      }
-                    }}
+                    ref={arenaVideoRef}
                     autoPlay
                     playsInline
                     muted
-                    className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 opacity-60"
+                    className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 opacity-60 pointer-events-none"
                   />
                 ) : (
                   <div 
-                    className="absolute inset-0 bg-cover bg-center opacity-40"
+                    className="absolute inset-0 bg-cover bg-center opacity-40 pointer-events-none"
                     style={{ backgroundImage: `url('/assets/bg_underwater.jpg')` }}
                   />
                 )}
@@ -1277,7 +1286,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
                 {/* 2. SWIMMING FISH WITH CATCH TARGET ZONE */}
                 <div 
-                  className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-100 flex items-center justify-center z-10"
+                  className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-10 will-change-transform"
                   style={{
                     left: `${fishPos.x}%`,
                     top: `${fishPos.y}%`,
@@ -1287,10 +1296,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 >
                   {/* Glowing Capture Ring */}
                   <div 
-                    className={`absolute inset-0 rounded-full border-2 transition-all duration-100 ${
+                    className={`absolute inset-0 rounded-full border-2 transition-colors duration-150 ${
                       isLockedOn 
-                        ? 'border-emerald-400 bg-emerald-500/30 shadow-[0_0_30px_#10b981]' 
-                        : 'border-amber-400 border-dashed bg-amber-500/10 shadow-[0_0_15px_#f59e0b]'
+                        ? 'border-emerald-400 bg-emerald-500/30 shadow-[0_0_25px_#10b981]' 
+                        : 'border-amber-400 border-dashed bg-amber-500/10 shadow-[0_0_12px_#f59e0b]'
                     }`}
                   />
 
@@ -1315,13 +1324,13 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 {/* 3. PLAYER'S FINGERTIP RETICLE (Webcam optical tracker) */}
                 {cameraStatus === 'ACTIVE' && (
                   <div 
-                    className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 flex flex-col items-center justify-center z-20"
+                    className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-20 will-change-transform"
                     style={{
                       left: `${handPos.x}%`,
                       top: `${handPos.y}%`
                     }}
                   >
-                    <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center transition-all ${
+                    <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
                       isLockedOn 
                         ? 'border-emerald-300 bg-emerald-400/30 shadow-[0_0_20px_#10b981]' 
                         : 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_15px_#22d3ee]'
@@ -1508,13 +1517,19 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover transform -scale-x-100"
+                className={`w-full h-full object-cover transform -scale-x-100 ${stage === 'REELING' ? 'opacity-0' : 'opacity-100'}`}
               />
 
+              {stage === 'REELING' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center font-arcade text-[7px] text-emerald-400 bg-black/90">
+                  <span className="animate-pulse">● КАМЕРА В АРЕНЕ</span>
+                </div>
+              )}
+
               {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
-              {cameraStatus === 'ACTIVE' && (
+              {cameraStatus === 'ACTIVE' && stage !== 'REELING' && (
                 <div 
-                  className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 z-10"
+                  className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 z-10 will-change-transform"
                   style={{
                     left: `${handPos.x}%`,
                     top: `${handPos.y}%`

@@ -78,9 +78,15 @@ class SoundEffects {
     osc.stop(now + 0.25);
   }
 
+  private lastReelClickTime = 0;
+
   // Reel click (ratchet)
   playReelClick() {
     if (!this.enabled) return;
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastReelClickTime < 120) return;
+    this.lastReelClickTime = nowMs;
+
     this.initCtx();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
