@@ -102,50 +102,50 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Simulated depth
   const [depth, setDepth] = useState(45);
 
-  // Initial progress by rarity tier
+  // Initial progress by rarity tier (High base progress for fast, snappy reeling)
   const getInitialProgress = (rarity: RarityType) => {
     switch (rarity) {
-      case 'COMMON': return 40;
-      case 'UNCOMMON': return 30;
-      case 'RARE': return 25;
-      case 'EPIC': return 20;
-      case 'MYTHIC': return 15;
-      case 'SECRET': return 12;
-      case 'GODLY': return 10;
-      case 'ARCANE': return 8;
-      default: return 25;
+      case 'COMMON': return 55;
+      case 'UNCOMMON': return 50;
+      case 'RARE': return 45;
+      case 'EPIC': return 40;
+      case 'MYTHIC': return 35;
+      case 'SECRET': return 30;
+      case 'GODLY': return 28;
+      case 'ARCANE': return 25;
+      default: return 40;
     }
   };
 
-  // Scaled Difficulty Parameters based on Fish Rarity (Enhanced challenge for lively fish)
+  // Scaled Difficulty Parameters: Fast arcade reeling (2 - 3.5 seconds total hold time)
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
-        // Boot: radius 26, steady glide
-        return { targetRadius: 26, swimSpeed: 0.12, gain: 1.6, loss: 0.55, changeInterval: 42, evasion: 0.06 };
+        // Fast catch (~1.0 - 1.2s)
+        return { targetRadius: 26, swimSpeed: 0.12, gain: 3.5, loss: 0.30, changeInterval: 42, evasion: 0.04 };
       case 'UNCOMMON':
-        // Salmon: tightened radius 18, lively swim speed 0.20, evasion 0.18
-        return { targetRadius: 18, swimSpeed: 0.20, gain: 1.25, loss: 0.75, changeInterval: 24, evasion: 0.18 };
+        // Snappy catch (~1.5 - 1.8s)
+        return { targetRadius: 20, swimSpeed: 0.18, gain: 2.8, loss: 0.40, changeInterval: 24, evasion: 0.10 };
       case 'RARE':
-        // Goldfish: radius 15, dynamic darting
-        return { targetRadius: 15, swimSpeed: 0.26, gain: 1.05, loss: 0.85, changeInterval: 18, evasion: 0.24 };
+        // Dynamic (~2.0 - 2.3s)
+        return { targetRadius: 17, swimSpeed: 0.23, gain: 2.3, loss: 0.48, changeInterval: 18, evasion: 0.16 };
       case 'EPIC':
-        // Anglerfish: compact radius 12.5, fast turns
-        return { targetRadius: 12.5, swimSpeed: 0.35, gain: 0.90, loss: 0.95, changeInterval: 14, evasion: 0.32 };
+        // Lively (~2.3 - 2.7s)
+        return { targetRadius: 15, swimSpeed: 0.28, gain: 2.0, loss: 0.55, changeInterval: 14, evasion: 0.20 };
       case 'MYTHIC':
-        // Megalodon: tight radius 10%, fierce speed and sharp evasion
-        return { targetRadius: 10, swimSpeed: 0.45, gain: 0.75, loss: 1.05, changeInterval: 11, evasion: 0.42 };
+        // Agile (~2.7 - 3.0s)
+        return { targetRadius: 13, swimSpeed: 0.34, gain: 1.8, loss: 0.62, changeInterval: 11, evasion: 0.25 };
       case 'SECRET':
-        // Abyssal Leviathan: small radius 8.5%, fast feints
-        return { targetRadius: 8.5, swimSpeed: 0.55, gain: 0.60, loss: 1.20, changeInterval: 8, evasion: 0.52 };
+        // Evasive (~3.0 - 3.3s)
+        return { targetRadius: 11, swimSpeed: 0.40, gain: 1.6, loss: 0.70, changeInterval: 9, evasion: 0.30 };
       case 'GODLY':
-        // Celestial Whale: tiny radius 7.0%, aggressive zig-zagging
-        return { targetRadius: 7.0, swimSpeed: 0.68, gain: 0.48, loss: 1.35, changeInterval: 6, evasion: 0.65 };
+        // Elite (~3.3 - 3.6s)
+        return { targetRadius: 9.5, swimSpeed: 0.46, gain: 1.45, loss: 0.78, changeInterval: 7, evasion: 0.35 };
       case 'ARCANE':
-        // Neon Jellyfish: supreme agility 5.5% radius, lightning evasive bursts
-        return { targetRadius: 5.5, swimSpeed: 0.82, gain: 0.38, loss: 1.60, changeInterval: 4, evasion: 0.88 };
+        // Boss tier (~3.6 - 4.0s)
+        return { targetRadius: 8.5, swimSpeed: 0.52, gain: 1.30, loss: 0.85, changeInterval: 6, evasion: 0.42 };
       default:
-        return { targetRadius: 16, swimSpeed: 0.22, gain: 1.1, loss: 0.75, changeInterval: 20, evasion: 0.20 };
+        return { targetRadius: 16, swimSpeed: 0.22, gain: 2.2, loss: 0.50, changeInterval: 20, evasion: 0.18 };
     }
   };
 
@@ -633,9 +633,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       let evasionY = 0;
       if (isLocked && diffParams.evasion > 0) {
         const safeDist = distance || 1;
-        // Strong repulsion vector pushing fish away from player's finger
-        evasionX = - (distX / safeDist) * diffParams.evasion * 20;
-        evasionY = - (distY / safeDist) * diffParams.evasion * 20;
+        // Controlled repulsion vector pushing fish away smoothly
+        evasionX = - (distX / safeDist) * diffParams.evasion * 10;
+        evasionY = - (distY / safeDist) * diffParams.evasion * 10;
 
         // High rarity agile feints (sudden dart bursts across the arena)
         if (diffParams.evasion >= 0.15 && Math.random() < 0.08) {
