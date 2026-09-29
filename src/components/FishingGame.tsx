@@ -121,6 +121,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
 
+  // Direct DOM refs for 60 FPS Reeling & Optical HUD (Zero React re-renders)
+  const fishRingRef = useRef<HTMLDivElement>(null);
+  const reticleRef = useRef<HTMLDivElement>(null);
+  const hudReticleRef = useRef<HTMLDivElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const progressTextRef = useRef<HTMLSpanElement>(null);
+  const offTargetBarRef = useRef<HTMLDivElement>(null);
+  const offTargetTextRef = useRef<HTMLSpanElement>(null);
+  const offTargetToleranceRef = useRef<HTMLSpanElement>(null);
+  const motionIntensityTextRef = useRef<HTMLSpanElement>(null);
+
   // Simulated depth
   const [depth, setDepth] = useState(45);
 
@@ -275,7 +286,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     };
   }, [stage]);
 
-  // 2. Optical Motion & Fingertip Direction Tracking Loop
+  // 2. Optical Motion & Fingertip Direction Tracking Loop (Direct DOM + Extremity Apex)
   useEffect(() => {
     if (cameraStatus !== 'ACTIVE') return;
 
@@ -285,7 +296,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const canvas = motionCanvasRef.current;
       if (!video || !canvas || video.readyState < 2) return;
 
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
 
       if (canvas.width !== 64) canvas.width = 64;
@@ -297,113 +308,186 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       if (prevPixels) {
         let diffSum = 0;
-        let weightedX = 0;
-        let weightedY = 0;
+        let motionWeightedX = 0;
+        let motionWeightedY = 0;
         let motionPoints = 0;
 
-        // Fingertip detection: track topmost active motion cluster (fast single pass, zero skin noise)
-        let minY = 48;
-        let tipMotionSumX = 0;
-        let tipMotionCount = 0;
+        let skinCount = 0;
+        let skinSumX = 0;
+        let skinSumY = 0;
+        let skinMinX = 64, skinMaxX = 0, skinMinY = 48, skinMaxY = 0;
+
+        const skinMask = new Uint8Array(64 * 48);
 
         for (let i = 0; i < data.length; i += 4) {
-          const lumNow = (data[i] + data[i+1] + data[i+2]) / 3;
+          const r = data[i];
+          const g = data[i+1];
+          const b = data[i+2];
+
+          const lumNow = (r + g + b) / 3;
           const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
           const diff = Math.abs(lumNow - lumPrev);
 
-          // Responsive differential motion threshold
-          if (diff > 15) {
-            diffSum += diff;
-            const pixelIdx = i / 4;
-            const x = pixelIdx % 64;
-            const y = Math.floor(pixelIdx / 64);
-            weightedX += x;
-            weightedY += y;
-            motionPoints++;
+          const pixelIdx = i / 4;
+          const x = pixelIdx % 64;
+          const y = Math.floor(pixelIdx / 64);
 
-            // Detect top-most finger points (index fingertip apex pointing towards camera)
-            if (y < minY) {
-              minY = y;
-              tipMotionSumX = x;
-              tipMotionCount = 1;
-            } else if (y <= minY + 1.5) {
-              tipMotionSumX += x;
-              tipMotionCount++;
-            }
+          if (diff > 14) {
+            diffSum += diff;
+            motionWeightedX += x;
+            motionWeightedY += y;
+            motionPoints++;
+          }
+
+          // Robust hand skin detection across skin tones, camera white balances, and lighting
+          const isSkin = (r > 38 && g > 18 && b > 10 && r > b && (r >= g - 12) && (r - g) < 90) ||
+                         (diff > 14 && (r + g + b) > 75 && r > b);
+
+          if (isSkin) {
+            skinMask[pixelIdx] = 1;
+            skinCount++;
+            skinSumX += x;
+            skinSumY += y;
+            if (x < skinMinX) skinMinX = x;
+            if (x > skinMaxX) skinMaxX = x;
+            if (y < skinMinY) skinMinY = y;
+            if (y > skinMaxY) skinMaxY = y;
           }
         }
 
         const avgMotion = Math.min(100, Math.floor(diffSum / 120));
-        if (Math.abs(avgMotion - lastReportedMotionRef.current) >= 4) {
+        // Direct DOM update for motion percentage in HUD (avoids full component re-render)
+        if (motionIntensityTextRef.current && Math.abs(avgMotion - lastReportedMotionRef.current) >= 2) {
           lastReportedMotionRef.current = avgMotion;
-          setMotionIntensity(avgMotion);
+          motionIntensityTextRef.current.textContent = `${avgMotion}%`;
+          motionIntensityTextRef.current.className = avgMotion > 20 ? 'text-emerald-400 font-bold' : 'text-zinc-500';
         }
 
-        if (motionPoints > 6) {
-          // Centroid coordinates (mirrored X)
-          const centroidX = (1 - (weightedX / motionPoints) / 64) * 100;
-          const centroidY = ((weightedY / motionPoints) / 48) * 100;
+        // =========================================================================================
+        // OUTSTRETCHED INDEX FINGERTIP TRACKING (Apex & Furthest Protrusion from Centroid)
+        // Mathematically locks onto the tip of the outstretched index finger and completely rejects knuckles/wrist
+        // even when the finger is held completely motionless!
+        // =========================================================================================
+        let rawTargetX: number | null = null;
+        let rawTargetY: number | null = null;
 
-          let rawX = centroidX;
-          let rawY = centroidY;
+        if (skinCount >= 8) {
+          const cx = skinSumX / skinCount;
+          const cy = skinSumY / skinCount;
 
-          // MAXIMUM EMPHASIS ON INDEX FINGERTIP APEX (98% tip + 2% anchor: zero knuckle pull!)
-          if (tipMotionCount > 0) {
-            const tipX = (1 - (tipMotionSumX / tipMotionCount) / 64) * 100;
-            const tipY = ((minY + 0.3) / 48) * 100;
-            rawX = tipX * 0.98 + centroidX * 0.02;
-            rawY = tipY * 0.98 + centroidY * 0.02;
-          }
+          // Search upper/forward hemisphere of hand (y <= cy + 3) to exclude forearm/wrist
+          const maxAllowedY = Math.min(skinMaxY, Math.floor(cy + 3));
+          let maxD2 = 0;
+          let apexMinY = 48;
 
-          // Ultra-low latency tracking filter (0.85 response rate = instant real-time reaction)
-          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.85;
-          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.85;
-
-          const roundedHandX = Math.round(handPosRef.current.x);
-          const roundedHandY = Math.round(handPosRef.current.y);
-          setHandPos(prev => (prev.x === roundedHandX && prev.y === roundedHandY ? prev : { x: roundedHandX, y: roundedHandY }));
-
-          // 1. FAULT TRIGGER: Early twitch in WAITING stage scares fish
-          if (stage === 'WAITING' && avgMotion > 16) {
-            triggerEarlyFoul();
-          }
-          // 2. STRIKE: Ultra-low latency strike trigger in BITE stage
-          else if (stage === 'BITE' && avgMotion > 12) {
-            handleStrike();
-          }
-          // 3. LANDING: Quick gesture in LANDING stage
-          else if (stage === 'LANDING' && avgMotion > 16) {
-            handleAcceptCatch();
-          }
-        }
-
-        // LOW-THRESHOLD THUMBS UP (👍) GESTURE DETECTOR
-        // Runs in IDLE, CATCH_SUCCESS, LOST (lightweight, highly forgiving threshold)
-        if (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST') {
-          let skinMinX = 64, skinMaxX = 0, skinMinY = 48, skinMaxY = 0;
-          let skinCount = 0;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i+1], b = data[i+2];
-            // Highly tolerant skin/hand detector across pale/tan/deep skin and diverse webcams
-            const isSkin = (r > 35 && g > 15 && b > 10 && r > b && (r >= g - 12)) ||
-                           (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[i]+prevPixels[i+1]+prevPixels[i+2])/3)) > 14 && (r + g + b) > 80);
-
-            if (isSkin) {
-              const px = (i / 4) % 64;
-              const py = Math.floor((i / 4) / 64);
-              if (px < skinMinX) skinMinX = px;
-              if (px > skinMaxX) skinMaxX = px;
-              if (py < skinMinY) skinMinY = py;
-              if (py > skinMaxY) skinMaxY = py;
-              skinCount++;
+          for (let y = skinMinY; y <= maxAllowedY; y++) {
+            const rowOffset = y * 64;
+            for (let x = skinMinX; x <= skinMaxX; x++) {
+              if (skinMask[rowOffset + x] === 1) {
+                const dx = x - cx;
+                const dy = y - cy;
+                const d2 = dx * dx + dy * dy;
+                if (d2 > maxD2) {
+                  maxD2 = d2;
+                }
+                if (y < apexMinY) {
+                  apexMinY = y;
+                }
+              }
             }
           }
 
+          // Outstretched index finger tip is the narrow extremity with maximum distance from palm centroid
+          const d2Cutoff = Math.max(12, maxD2 * 0.85);
+          let tipSumX = 0;
+          let tipSumY = 0;
+          let tipCount = 0;
+
+          for (let y = skinMinY; y <= maxAllowedY; y++) {
+            const rowOffset = y * 64;
+            for (let x = skinMinX; x <= skinMaxX; x++) {
+              if (skinMask[rowOffset + x] === 1) {
+                const dx = x - cx;
+                const dy = y - cy;
+                const d2 = dx * dx + dy * dy;
+                // Strict fingertip apex filter: furthest protrusion AND near the topmost tip
+                if (d2 >= d2Cutoff && y <= apexMinY + 4) {
+                  tipSumX += x;
+                  tipSumY += y;
+                  tipCount++;
+                }
+              }
+            }
+          }
+
+          if (tipCount > 0) {
+            // Mirrored X for natural user orientation
+            rawTargetX = (1 - (tipSumX / tipCount) / 64) * 100;
+            rawTargetY = (((tipSumY / tipCount) + 0.2) / 48) * 100;
+          } else if (apexMinY < 48) {
+            let topSumX = 0;
+            let topCount = 0;
+            for (let x = skinMinX; x <= skinMaxX; x++) {
+              if (skinMask[apexMinY * 64 + x] === 1) {
+                topSumX += x;
+                topCount++;
+              }
+            }
+            if (topCount > 0) {
+              rawTargetX = (1 - (topSumX / topCount) / 64) * 100;
+              rawTargetY = ((apexMinY + 0.2) / 48) * 100;
+            }
+          }
+        }
+
+        // Fallback to motion cluster if skin contrast is too low
+        if (rawTargetX === null && motionPoints > 6) {
+          rawTargetX = (1 - (motionWeightedX / motionPoints) / 64) * 100;
+          rawTargetY = ((motionWeightedY / motionPoints) / 48) * 100;
+        }
+
+        if (rawTargetX !== null && rawTargetY !== null) {
+          // Instant 60 FPS response filter (0.84 alpha: zero noticeable latency, smooth trajectory)
+          handPosRef.current.x += (rawTargetX - handPosRef.current.x) * 0.84;
+          handPosRef.current.y += (rawTargetY - handPosRef.current.y) * 0.84;
+
+          // Clamp within screen boundaries
+          handPosRef.current.x = Math.max(3, Math.min(97, handPosRef.current.x));
+          handPosRef.current.y = Math.max(3, Math.min(97, handPosRef.current.y));
+
+          // Direct DOM updates: ZERO React re-renders!
+          const posX = handPosRef.current.x.toFixed(1);
+          const posY = handPosRef.current.y.toFixed(1);
+
+          if (reticleRef.current) {
+            reticleRef.current.style.left = `${posX}%`;
+            reticleRef.current.style.top = `${posY}%`;
+          }
+          if (hudReticleRef.current) {
+            hudReticleRef.current.style.left = `${posX}%`;
+            hudReticleRef.current.style.top = `${posY}%`;
+          }
+        }
+
+        // 1. FAULT TRIGGER: Early twitch in WAITING stage scares fish
+        if (stage === 'WAITING' && avgMotion > 16) {
+          triggerEarlyFoul();
+        }
+        // 2. STRIKE: Ultra-low latency strike trigger in BITE stage
+        else if (stage === 'BITE' && avgMotion > 12) {
+          handleStrike();
+        }
+        // 3. LANDING: Quick gesture in LANDING stage
+        else if (stage === 'LANDING' && avgMotion > 16) {
+          handleAcceptCatch();
+        }
+
+        // LOW-THRESHOLD THUMBS UP (👍) GESTURE DETECTOR
+        // Runs in IDLE, CATCH_SUCCESS, LOST using pre-computed skinMask
+        if (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST') {
           let isThumbsUpCandidate = false;
           let isWrongGestureCandidate = false;
 
-          // Hand presence threshold: hand has at least 8 pixels (works at standard desktop distance)
           if (skinCount >= 8 && (skinMaxY - skinMinY) >= 5 && (skinMaxX - skinMinX) >= 4) {
             const handH = skinMaxY - skinMinY + 1;
             const handW = skinMaxX - skinMinX + 1;
@@ -415,12 +499,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             let bottomMinX = 64, bottomMaxX = 0;
 
             for (let y = skinMinY; y <= skinMaxY; y++) {
+              const rowOffset = y * 64;
               for (let x = skinMinX; x <= skinMaxX; x++) {
-                const idx = (y * 64 + x) * 4;
-                const r = data[idx], g = data[idx+1], b = data[idx+2];
-                const isSkin = (r > 35 && g > 15 && b > 10 && r > b && (r >= g - 12)) ||
-                               (prevPixels && Math.abs((r+g+b)/3 - ((prevPixels[idx]+prevPixels[idx+1]+prevPixels[idx+2])/3)) > 14 && (r + g + b) > 80);
-                if (isSkin) {
+                if (skinMask[rowOffset + x] === 1) {
                   if (y <= topBoundary) {
                     topPixels++;
                     if (x < topMinX) topMinX = x;
@@ -437,12 +518,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             const topW = topMaxX >= topMinX ? (topMaxX - topMinX + 1) : 0;
             const bottomW = bottomMaxX >= bottomMinX ? (bottomMaxX - bottomMinX + 1) : 0;
 
-            // Strict distinction: Thumbs Up (👍) vs Other Gestures (open palm, flat hand, spread fingers)
-            // Thumbs Up characteristics:
-            // 1. Single thumb in top 40% (topW <= bottomW * 0.68)
-            // 2. Curled fist mass in bottom 60% (bottomPixels >= topPixels * 1.30 and bottomPixels >= 6)
-            // 3. Thumb protrusion exists (topPixels >= 2)
-            // 4. Hand is vertical/compact (handH >= handW * 0.55 && handH <= handW * 2.5)
             const isNarrowThumb = topW > 0 && bottomW > 0 && topW <= Math.max(3, Math.floor(bottomW * 0.68));
             const isSolidFist = bottomPixels >= Math.max(6, Math.floor(topPixels * 1.30));
             const isVerticalHand = handH >= handW * 0.55 && handH <= handW * 2.5;
@@ -451,12 +526,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             if (isNarrowThumb && isSolidFist && isVerticalHand && hasThumbProtrusion) {
               isThumbsUpCandidate = true;
             } else {
-              // Hand is detected, but fingers are spread or it's an open palm / non-thumbs-up gesture
               isWrongGestureCandidate = true;
             }
           }
 
-          // Leaky integrators: fast attack (+2), slow decay (-1) -> instant trigger, zero flicker
           if (isThumbsUpCandidate) {
             thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 2);
             wrongGestureCounterRef.current = Math.max(0, wrongGestureCounterRef.current - 2);
@@ -476,8 +549,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const wrongGestureActive = !thumbsUpActive && wrongGestureCounterRef.current >= 2;
           setIsWrongGesture(wrongGestureActive);
 
-          // Hold-to-Cast with Thumbs Up (👍) in IDLE stage
-          // 1.2s grace period on entry prevents immediate accidental bite on load
           const now = Date.now();
           const isEligibleToCast = stage === 'IDLE' && (now - idleEnterTimeRef.current >= 1200);
 
@@ -491,7 +562,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             const progress = Math.round((thumbsUpHoldCountRef.current / 10) * 100);
             setThumbsUpHoldProgress(progress);
 
-            // Cast triggers when held for 0.3s (10 frames)
             if (progress >= 100) {
               handleCast();
               thumbsUpHoldCountRef.current = 0;
@@ -776,17 +846,40 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       fishPosRef.current.x = Math.max(6, Math.min(94, nextX));
       fishPosRef.current.y = Math.max(8, Math.min(92, nextY));
 
-      const roundedFishX = Math.round(fishPosRef.current.x * 2) / 2;
-      const roundedFishY = Math.round(fishPosRef.current.y * 2) / 2;
-      setFishPos(prev => (prev.x === roundedFishX && prev.y === roundedFishY ? prev : { x: roundedFishX, y: roundedFishY }));
+      // Direct DOM update for swimming fish target zone (zero React re-renders)
+      if (fishRingRef.current) {
+        fishRingRef.current.style.left = `${fishPosRef.current.x.toFixed(1)}%`;
+        fishRingRef.current.style.top = `${fishPosRef.current.y.toFixed(1)}%`;
+      }
 
-      setIsLockedOn((prev) => (prev !== isLocked ? isLocked : prev));
+      // Discrete lock status update only on actual transition
+      if (isLocked !== isLockedOnRef.current) {
+        isLockedOnRef.current = isLocked;
+        setIsLockedOn(isLocked);
+      }
 
       // 5. CUMULATIVE OFF-TARGET TIMEOUT (User Requirement: 1.5s cumulative across the round)
       if (!isLocked) {
         cumulativeOffTargetMsRef.current += deltaMs;
-        const roundedOff = Math.round(cumulativeOffTargetMsRef.current / 40) * 40;
-        setOffTargetMs(prev => (prev === roundedOff ? prev : roundedOff));
+        const ms = cumulativeOffTargetMsRef.current;
+
+        // Direct DOM update for off-target gauge
+        if (offTargetBarRef.current) {
+          offTargetBarRef.current.style.width = `${Math.min(100, (ms / 1500) * 100).toFixed(1)}%`;
+          offTargetBarRef.current.className = `h-full transition-none ${
+            ms > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : ms > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
+          }`;
+        }
+        if (offTargetTextRef.current) {
+          offTargetTextRef.current.className = ms > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400';
+          offTargetTextRef.current.textContent = ms > 0 
+            ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(ms / 1000).toFixed(2)}с / 1.50с` : `⚠️ OFF-TARGET: ${(ms / 1000).toFixed(2)}s / 1.50s`) 
+            : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)' : '✓ TARGET LOCKED (0.00s / 1.50s)');
+        }
+        if (offTargetToleranceRef.current) {
+          offTargetToleranceRef.current.className = ms > 1000 ? 'text-red-400 font-bold' : ms > 500 ? 'text-amber-400' : 'text-emerald-400';
+          offTargetToleranceRef.current.textContent = `${language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: ${Math.max(0, (1500 - ms) / 1000).toFixed(2)}s`;
+        }
 
         if (cumulativeOffTargetMsRef.current >= 1500) {
           isRoundFinishedRef.current = true;
@@ -815,11 +908,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         currentProgressRef.current = Math.max(0, currentProgressRef.current - diffParams.loss);
       }
 
-      // Keep integer percentage in state to prevent redundant micro-renders
-      const roundedProgress = Math.round(currentProgressRef.current);
-      if (roundedProgress !== lastReportedProgressRef.current) {
-        lastReportedProgressRef.current = roundedProgress;
-        setCatchProgress(roundedProgress);
+      // Direct DOM update for progress bar and percentage text
+      if (progressBarRef.current) {
+        progressBarRef.current.style.width = `${Math.min(100, Math.max(0, currentProgressRef.current)).toFixed(1)}%`;
+      }
+      if (progressTextRef.current) {
+        const rounded = Math.round(currentProgressRef.current);
+        progressTextRef.current.textContent = `${rounded}% / 100%`;
+        progressTextRef.current.className = rounded > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold';
       }
 
       // 7. CATCH LANDING (1.0s acceptance window) OR ZERO-PROGRESS LOST TRIGGER
@@ -1424,12 +1520,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     <span className="text-zinc-400">
                       {language === 'ru' ? 'ПРОГРЕСС ВЫВАЖИВАНИЯ:' : 'REELING PROGRESS:'}
                     </span>
-                    <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    <span 
+                      ref={progressTextRef}
+                      className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}
+                    >
                       {Math.round(catchProgress)}% / 100%
                     </span>
                   </div>
                   <div className="w-full h-3.5 bg-black border border-emerald-500 p-0.5 overflow-hidden">
                     <div 
+                      ref={progressBarRef}
                       className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-none"
                       style={{ width: `${Math.min(100, Math.max(0, catchProgress)).toFixed(1)}%` }}
                     />
@@ -1439,17 +1539,24 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 {/* Cumulative 1.5s Off-Target Tolerance Gauge */}
                 <div className="space-y-1 pt-1 border-t border-emerald-500/20">
                   <div className="flex justify-between font-arcade text-[8px]">
-                    <span className={offTargetMs > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}>
+                    <span 
+                      ref={offTargetTextRef}
+                      className={offTargetMs > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}
+                    >
                       {offTargetMs > 0 
                         ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(offTargetMs / 1000).toFixed(2)}с / 1.50с` : `⚠️ OFF-TARGET: ${(offTargetMs / 1000).toFixed(2)}s / 1.50s`) 
                         : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)' : '✓ TARGET LOCKED (0.00s / 1.50s)')}
                     </span>
-                    <span className={offTargetMs > 1000 ? 'text-red-400 font-bold' : offTargetMs > 500 ? 'text-amber-400' : 'text-emerald-400'}>
+                    <span 
+                      ref={offTargetToleranceRef}
+                      className={offTargetMs > 1000 ? 'text-red-400 font-bold' : offTargetMs > 500 ? 'text-amber-400' : 'text-emerald-400'}
+                    >
                       {language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: {Math.max(0, (1500 - offTargetMs) / 1000).toFixed(2)}s
                     </span>
                   </div>
                   <div className="w-full h-2 bg-black border border-zinc-700 p-0.5 overflow-hidden">
                     <div 
+                      ref={offTargetBarRef}
                       className={`h-full transition-none ${
                         offTargetMs > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : offTargetMs > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
                       }`}
@@ -1501,6 +1608,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
                 {/* 2. SWIMMING FISH WITH CATCH TARGET ZONE */}
                 <div 
+                  ref={fishRingRef}
                   className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-10 will-change-transform"
                   style={{
                     left: `${fishPos.x}%`,
@@ -1539,6 +1647,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 {/* 3. PLAYER'S FINGERTIP RETICLE (Webcam optical tracker - Maximum Emphasis on Index Fingertip) */}
                 {cameraStatus === 'ACTIVE' && (
                   <div 
+                    ref={reticleRef}
                     className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-20 will-change-transform"
                     style={{
                       left: `${handPos.x}%`,
@@ -1784,6 +1893,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
               {cameraStatus === 'ACTIVE' && (
                 <div 
+                  ref={hudReticleRef}
                   className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 z-10 will-change-transform"
                   style={{
                     left: `${handPos.x}%`,
@@ -1822,7 +1932,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             {/* Bottom Camera Telemetry */}
             <div className="mt-1 flex justify-between font-arcade text-[7px] text-zinc-400 px-1">
               <span>ДВИЖЕНИЕ:</span>
-              <span className={motionIntensity > 20 ? 'text-emerald-400 font-bold' : 'text-zinc-500'}>
+              <span 
+                ref={motionIntensityTextRef}
+                className={motionIntensity > 20 ? 'text-emerald-400 font-bold' : 'text-zinc-500'}
+              >
                 {motionIntensity}%
               </span>
             </div>
