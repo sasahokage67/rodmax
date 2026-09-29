@@ -58,6 +58,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const arenaVideoRef = useRef<HTMLVideoElement>(null);
   const lastReelClickTimeRef = useRef(0);
   const lastReportedMotionRef = useRef(0);
+  const catchSuccessTimeRef = useRef(0);
+  const [recastCooldown, setRecastCooldown] = useState(0);
 
   // Thumbs Up (👍) Gesture State
   const [isThumbsUp, setIsThumbsUp] = useState(false);
@@ -244,17 +246,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let weightedY = 0;
         let motionPoints = 0;
 
-        // Fingertip detection: track the topmost active motion cluster (leading finger pointing upwards)
+        // 1. Pass 1: Global Motion & True Apex Y Detection
         let minY = 48;
-        let tipMotionSumX = 0;
-        let tipMotionCount = 0;
 
         for (let i = 0; i < data.length; i += 4) {
-          const lumNow = (data[i] + data[i+1] + data[i+2]) / 3;
+          const r = data[i], g = data[i+1], b = data[i+2];
+          const lumNow = (r + g + b) / 3;
           const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
           const diff = Math.abs(lumNow - lumPrev);
 
-          if (diff > 22) {
+          // Combined motion and foreground skin check
+          const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 8 && (r - b) > 4);
+          const isActive = diff > 16 || (isSkin && diff > 7);
+
+          if (isActive) {
             diffSum += diff;
             const pixelIdx = i / 4;
             const x = pixelIdx % 64;
@@ -263,14 +268,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             weightedY += y;
             motionPoints++;
 
-            // Detect top-most finger points (finger pointing up towards camera)
             if (y < minY) {
               minY = y;
-              tipMotionSumX = x;
-              tipMotionCount = 1;
-            } else if (y <= minY + 3) {
-              tipMotionSumX += x;
-              tipMotionCount++;
             }
           }
         }
@@ -281,26 +280,50 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           setMotionIntensity(avgMotion);
         }
 
-        if (motionPoints > 10) {
+        if (motionPoints > 8 && minY < 46) {
           // Centroid coordinates (mirrored X)
           const centroidX = (1 - (weightedX / motionPoints) / 64) * 100;
           const centroidY = ((weightedY / motionPoints) / 48) * 100;
 
+          // 2. Pass 2: STRICT Apex Isolation for Index Fingertip
+          // Only gather pixels at the topmost apex [minY, minY + 1.2 rows].
+          // This strictly isolates the index tip and excludes knuckles and curled fingers (4-8px below).
+          let tipMotionSumX = 0;
+          let tipMotionCount = 0;
+
+          for (let i = 0; i < data.length; i += 4) {
+            const pixelIdx = i / 4;
+            const y = Math.floor(pixelIdx / 64);
+            if (y <= minY + 1.2) {
+              const r = data[i], g = data[i+1], b = data[i+2];
+              const lumNow = (r + g + b) / 3;
+              const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
+              const diff = Math.abs(lumNow - lumPrev);
+              const isSkin = (r > 42 && g > 22 && b > 14 && r >= g - 8 && (r - b) > 4);
+
+              if (diff > 16 || (isSkin && diff > 7)) {
+                const x = pixelIdx % 64;
+                tipMotionSumX += x;
+                tipMotionCount++;
+              }
+            }
+          }
+
           let rawX = centroidX;
           let rawY = centroidY;
 
-          // Focus on fingertip: leading topmost motion cluster
+          // Pinpoint focus strictly on index fingertip:
           if (tipMotionCount > 0) {
             const tipX = (1 - (tipMotionSumX / tipMotionCount) / 64) * 100;
-            const tipY = ((minY + 1.5) / 48) * 100;
-            // 65% fingertip + 35% centroid for pinpoint pointing precision and low jitter
-            rawX = tipX * 0.65 + centroidX * 0.35;
-            rawY = tipY * 0.65 + centroidY * 0.35;
+            const tipY = (minY / 48) * 100;
+            // 96% Fingertip Apex + 4% Centroid: Eliminates knuckle/palm downward pull!
+            rawX = tipX * 0.96 + centroidX * 0.04;
+            rawY = tipY * 0.96 + centroidY * 0.04;
           }
 
           // Smooth low-pass filter
-          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.45;
-          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.45;
+          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.50;
+          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.50;
 
           setHandPos({
             x: Math.round(handPosRef.current.x),
@@ -308,7 +331,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           });
 
           // Geometric Thumbs Up (👍) analysis ONLY when casting is possible (saves CPU during REELING):
-          const canCastWithThumbsUp = (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST');
+          const isCatchReviewing = stage === 'CATCH_SUCCESS' && (Date.now() - catchSuccessTimeRef.current < 2500);
+          const canCastWithThumbsUp = stage === 'IDLE' || (stage === 'CATCH_SUCCESS' && !isCatchReviewing) || stage === 'LOST';
           if (canCastWithThumbsUp) {
             let handMinX = 64, handMaxX = 0, handMinY = 48, handMaxY = 0;
             let skinCount = 0;
@@ -395,14 +419,18 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
             }
 
-            // Require 2 consecutive frames (~90ms) for responsive, natural feel
-            const isThumbsUpActive = thumbsUpCounterRef.current >= 2;
+            // In CATCH_SUCCESS require 4 consecutive frames (~120ms) so accidental flick doesn't trigger
+            const thresholdFrames = stage === 'CATCH_SUCCESS' ? 4 : 2;
+            const isThumbsUpActive = thumbsUpCounterRef.current >= thresholdFrames;
             setIsThumbsUp(isThumbsUpActive);
 
-            // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
-            if (isThumbsUpActive && (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST')) {
+            // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (after review delay)
+            if (isThumbsUpActive && canCastWithThumbsUp) {
               handleCast();
             }
+          } else {
+            thumbsUpCounterRef.current = 0;
+            setIsThumbsUp(false);
           }
 
           // 2. FAULT TRIGGER: Early twitch in WAITING stage scares fish
@@ -431,6 +459,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (stage !== 'IDLE' && stage !== 'CATCH_SUCCESS' && stage !== 'LOST') return;
 
     const now = Date.now();
+    // Guard against accidental launch immediately after catching
+    if (stage === 'CATCH_SUCCESS' && now - catchSuccessTimeRef.current < 2500) {
+      return;
+    }
     if (now - lastCastTimeRef.current < 1000) return;
     lastCastTimeRef.current = now;
 
@@ -871,6 +903,19 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }
 
     setStage('CATCH_SUCCESS');
+    catchSuccessTimeRef.current = Date.now();
+    setRecastCooldown(2.5);
+    thumbsUpCounterRef.current = 0;
+    setIsThumbsUp(false);
+
+    const cdStart = Date.now();
+    const cdInterval = setInterval(() => {
+      const left = Math.max(0, (2500 - (Date.now() - cdStart)) / 1000);
+      setRecastCooldown(Math.round(left * 10) / 10);
+      if (left <= 0) {
+        clearInterval(cdInterval);
+      }
+    }, 100);
 
     confetti({
       particleCount: isArcane ? 180 : 70,
@@ -1437,26 +1482,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             )}
 
             {/* Thumbs Up Gesture Banner for Mouse-Free Recast */}
-            <div className={`p-2.5 border transition-all ${
-              isThumbsUp 
+            <div className={`p-2.5 border transition-colors duration-150 ${
+              recastCooldown > 0
+                ? 'bg-zinc-950/80 border-zinc-700 text-zinc-400'
+                : isThumbsUp 
                 ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_20px_#10b981]' 
                 : 'bg-black/80 border-emerald-500/40 text-emerald-300'
             }`}>
               <div className="font-arcade text-[10px] flex items-center justify-center gap-1.5">
-                <span className="text-base">👍</span>
-                <span>{isThumbsUp ? 'ЖЕСТ «ЛАЙК» РАСПОЗНАН! ЗАБРОС...' : 'ПОКАЖИТЕ «ЛАЙК» В КАМЕРУ ДЛЯ ЗАБРОСА'}</span>
+                <span className="text-base">{recastCooldown > 0 ? '⏳' : '👍'}</span>
+                <span>
+                  {recastCooldown > 0 
+                    ? `ПАУЗА ПОСЛЕ УЛОВА: ${recastCooldown.toFixed(1)}с (СЛУЧАЙНЫЙ ЗАБРОС ЗАБЛОКИРОВАН)`
+                    : isThumbsUp 
+                    ? 'ЖЕСТ «ЛАЙК» РАСПОЗНАН! ЗАБРОС...' 
+                    : 'ПОКАЖИТЕ «ЛАЙК» В КАМЕРУ ДЛЯ ЗАБРОСА'}
+                </span>
               </div>
               <div className="font-mono text-[8px] text-zinc-400 mt-0.5">
-                Можно не трогать мышь — просто покажите большой палец вверх в объектив!
+                {recastCooldown > 0 
+                  ? 'Осмотрите улов. Следующий заброс разблокируется автоматически.' 
+                  : 'Можно не трогать мышь — просто покажите большой палец вверх в объектив!'}
               </div>
             </div>
 
             <div className="pt-1 flex flex-col sm:flex-row gap-2">
               <button
                 onClick={handleCast}
-                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b]"
+                disabled={recastCooldown > 0}
+                className={`flex-1 py-3 font-arcade text-xs border transition-all ${
+                  recastCooldown > 0
+                    ? 'bg-zinc-800 text-zinc-500 border-zinc-700 cursor-not-allowed'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-black border-emerald-300 shadow-[0_3px_0_#064e3b]'
+                }`}
               >
-                [ ЕЩЕ ЗАБРОС ]
+                {recastCooldown > 0 ? `[ ПАУЗА ${recastCooldown.toFixed(1)}с ]` : '[ ЕЩЕ ЗАБРОС ]'}
               </button>
               
               {!profile.isRegistered && setTab && (
