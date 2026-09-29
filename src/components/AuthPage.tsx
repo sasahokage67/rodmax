@@ -831,14 +831,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
                           {item.weight} КГ
                         </div>
-
-                        {/* Rarity Badge */}
-                        <div 
-                          className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/80 border font-arcade text-[8px]"
-                          style={{ borderColor: item.fish.color, color: item.fish.color }}
-                        >
-                          {item.fish.rarity}
-                        </div>
                       </div>
 
                       {/* Fish Info */}
@@ -939,13 +931,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       {/* How many times caught badge (xCount) */}
                       <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] text-emerald-300 shadow-md">
                         {hasCaughtEver ? `ПОЙМАНО: x${lifetimeCount}` : 'НЕ ПОЙМАНО'}
-                      </div>
-
-                      <div 
-                        className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/80 border font-arcade text-[8px]"
-                        style={{ borderColor: fish.color, color: fish.color }}
-                      >
-                        {fish.rarity}
                       </div>
                     </div>
 

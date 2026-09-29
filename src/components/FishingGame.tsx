@@ -55,6 +55,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
   const [lostReason, setLostReason] = useState<string | null>(null);
 
+  // 0.5s Fast Bite/Strike Window State
+  const [biteTimeLeft, setBiteTimeLeft] = useState(0.5);
+  const biteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // 1.0s Rapid Acceptance Window State
   const [landingTimeLeft, setLandingTimeLeft] = useState(1.0);
   const landingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -322,14 +326,27 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         setTargetFish(rolled);
         setStage('BITE');
 
-        // Failure Mode 2: Bite window timeout (1.5 seconds) before fish steals bait!
-        if (biteTimeoutRef.current) clearTimeout(biteTimeoutRef.current);
-        biteTimeoutRef.current = setTimeout(() => {
-          if (!isRoundFinishedRef.current) {
-            sound.playSnap();
-            triggerLost('ВРЕМЯ ВЫШЛО! Вы не успели подсечь рыбу за 1.5 секунды!');
+        // Strict 0.5s fast strike window: player must sharply move/thrust finger in camera or fish escapes!
+        setBiteTimeLeft(0.5);
+        if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
+        const biteStart = Date.now();
+        const biteDuration = 500; // 0.5s strictly!
+
+        biteIntervalRef.current = setInterval(() => {
+          const remaining = Math.max(0, (biteDuration - (Date.now() - biteStart)) / 1000);
+          setBiteTimeLeft(Math.round(remaining * 100) / 100);
+
+          if (remaining <= 0) {
+            if (biteIntervalRef.current) {
+              clearInterval(biteIntervalRef.current);
+              biteIntervalRef.current = null;
+            }
+            if (!isRoundFinishedRef.current) {
+              sound.playSnap();
+              triggerLost('ВЫ НЕ УСПЕЛИ РЕЗКО ПОДВИНУТЬ ПАЛЕЦ В КАМЕРУ ЗА 0.5 СЕК! Рыба сорвалась с крючка!');
+            }
           }
-        }, 1500);
+        }, 20);
       }, biteDelay);
     }, 900);
   };
@@ -337,6 +354,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Strike Handler
   const handleStrike = () => {
     if (stage !== 'BITE') return;
+    if (biteIntervalRef.current) {
+      clearInterval(biteIntervalRef.current);
+      biteIntervalRef.current = null;
+    }
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
@@ -580,6 +601,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (hasAwardedRef.current) return;
     hasAwardedRef.current = true;
 
+    if (biteIntervalRef.current) {
+      clearInterval(biteIntervalRef.current);
+      biteIntervalRef.current = null;
+    }
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
@@ -638,6 +663,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   };
 
   const triggerLost = (reason?: string) => {
+    if (biteIntervalRef.current) {
+      clearInterval(biteIntervalRef.current);
+      biteIntervalRef.current = null;
+    }
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
@@ -819,23 +848,42 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* BITE Event Alert */}
+        {/* BITE Event Alert: 0.5s Rapid Strike QTE */}
         {stage === 'BITE' && (
           <div 
             onClick={handleStrike}
-            className="pointer-events-auto cursor-pointer p-6 sm:p-8 bg-red-950/90 border-4 border-amber-400 text-center animate-bounce shadow-[0_0_50px_rgba(245,158,11,0.7)] pixel-corners space-y-3"
+            className="pointer-events-auto cursor-pointer p-6 sm:p-8 bg-red-950/95 border-4 border-amber-400 text-center animate-bounce shadow-[0_0_60px_rgba(239,68,68,0.8)] pixel-corners space-y-3 max-w-md w-full"
           >
-            <div className="font-arcade text-xl sm:text-2xl text-amber-300 tracking-widest drop-shadow-[0_2px_4px_black]">
+            <div className="font-arcade text-xl sm:text-2xl text-amber-300 tracking-widest drop-shadow-[0_2px_4px_black] animate-pulse">
               ! КЛЮЕТ !
             </div>
             <div className="font-arcade text-[10px] sm:text-xs text-white">
-              {cameraStatus === 'ACTIVE' 
-                ? 'РЕЗКО ВЗМАХНИТЕ РУКОЙ ВВЕРХ ПЕРЕД КАМЕРОЙ!' 
-                : 'НАЖМИТЕ КНОПКУ «ПОДСЕЧЬ»!'}
+              ☝️ РЕЗКО ПОДВИНЬТЕ ПАЛЕЦ В КАМЕРУ!
             </div>
-            <div className="inline-block py-2.5 px-6 bg-amber-400 text-black font-arcade text-xs font-bold border-2 border-white">
-              [ ПОДСЕЧЬ РЫБУ ]
+
+            {/* Live 0.5s Fast Shrinking Timer Bar */}
+            <div className="space-y-1">
+              <div className="flex justify-between font-arcade text-[10px]">
+                <span className="text-red-400 font-bold animate-pulse">ОКНО НА ПОДСЕЧКУ:</span>
+                <span className="text-amber-300 font-bold text-xs">{biteTimeLeft.toFixed(2)}с / 0.50с</span>
+              </div>
+              <div className="w-full h-3 bg-black border border-amber-400 p-0.5 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-red-600 via-amber-400 to-emerald-400 transition-all duration-75"
+                  style={{ width: `${Math.max(0, Math.min(100, (biteTimeLeft / 0.5) * 100))}%` }}
+                />
+              </div>
             </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStrike();
+              }}
+              className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-black font-arcade text-xs font-bold border-2 border-white shadow-[0_0_20px_rgba(245,158,11,0.8)]"
+            >
+              [ ПОДСЕЧЬ ПАЛЬЦЕМ / КЛИК ]
+            </button>
           </div>
         )}
 
@@ -901,9 +949,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 </div>
 
                 <div className="text-right">
-                  <div className="font-arcade text-[9px] text-zinc-400">СЛОЖНОСТЬ ВЫВАЖИВАНИЯ:</div>
-                  <div className="font-arcade text-xs text-amber-400">
-                    ТИР: {targetFish.rarity} // РАДИУС: {diffParams.targetRadius}%
+                  <div className="font-arcade text-[9px] text-zinc-400">ЗОНА ЗАХВАТА:</div>
+                  <div className="font-arcade text-xs text-emerald-400">
+                    РАДИУС: {diffParams.targetRadius}%
                   </div>
                 </div>
               </div>
@@ -1109,8 +1157,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 alt={lastCaught.fish.name}
                 className="w-full h-full object-cover"
               />
-              <div className="absolute bottom-2 left-2 right-2 bg-black/80 border border-zinc-800 p-1 flex justify-between items-center font-arcade text-[9px]">
-                <span style={{ color: lastCaught.fish.color }}>{lastCaught.fish.rarity}</span>
+              <div className="absolute bottom-2 right-2 bg-black/80 border border-zinc-800 px-2 py-0.5 font-arcade text-[9px]">
                 <span className="text-cyan-300 font-mono">ШАНС: {lastCaught.fish.catchChance}%</span>
               </div>
             </div>
@@ -1185,7 +1232,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
           <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах рукой вверх перед камерой или кнопка «Забросить»</div>
-          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при поклевке (окно 1.5 сек)</div>
+          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру при поклевке (окно 0.5 сек)</div>
           <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
           <div><span className="text-rose-400">[ПРИЕМ]</span> Быстро подтвердите улов (окно ровно 1.0 сек, иначе срыв!)</div>
         </div>

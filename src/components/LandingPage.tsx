@@ -322,19 +322,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 </div>
 
                 <div className="pt-2.5 pb-1 flex justify-between items-center">
-                  <span 
-                    className="font-arcade text-[8px] px-1.5 py-0.5 border"
-                    style={{ borderColor: fish.color, color: fish.color }}
-                  >
-                    {fish.rarity}
+                  <span className="font-arcade text-[9px] text-zinc-100 truncate">
+                    {fish.name}
                   </span>
-                  <span className="font-arcade text-[9px] text-amber-400">
+                  <span className="font-arcade text-[9px] text-amber-400 font-bold">
                     {fish.basePrice.toLocaleString()} C
                   </span>
-                </div>
-
-                <div className="font-arcade text-[9px] text-zinc-100 truncate mt-1">
-                  {fish.name}
                 </div>
               </div>
             ))}

@@ -90,7 +90,7 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
                   </div>
 
                   <div className="mt-2 flex justify-between items-center font-arcade text-[8px]">
-                    <span style={{ color: fish.color }}>{fish.rarity}</span>
+                    <span className="text-cyan-300 font-mono font-bold">{fish.catchChance}% ШАНС</span>
                     <span className="text-amber-400">{fish.basePrice.toLocaleString()} C</span>
                   </div>
 
@@ -125,13 +125,6 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
                     className="w-full h-full object-cover"
                   />
                 )}
-
-                <div 
-                  className="absolute top-2 right-2 px-2 py-0.5 bg-black/90 border font-arcade text-[8px]"
-                  style={{ borderColor: selectedFish.color, color: selectedFish.color }}
-                >
-                  {selectedFish.rarity}
-                </div>
 
                 <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/90 border border-cyan-400 font-mono text-[10px] text-cyan-300 font-bold">
                   ШАНС ПОКЛЕВКИ: {selectedFish.catchChance}%
