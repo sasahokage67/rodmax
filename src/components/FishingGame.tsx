@@ -15,7 +15,8 @@ import {
   Volume2,
   AlertTriangle,
   Target,
-  Crosshair
+  Crosshair,
+  Lightbulb
 } from 'lucide-react';
 
 interface FishingGameProps {
@@ -61,6 +62,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const isLockedOnRef = useRef(false);
   const lastReportedProgressRef = useRef(0);
   const lastCastTimeRef = useRef(0);
+
+  // Assistance & Hints State (idle hint and consecutive fails assistance)
+  const [showIdleHint, setShowIdleHint] = useState(false);
+  const [consecutiveFails, setConsecutiveFails] = useState(0);
+  const consecutiveFailsRef = useRef(0);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // False Start / Early Twitch Penalty State (Fault Mode)
   const [isFoul, setIsFoul] = useState(false);
@@ -213,8 +220,32 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       if (landingIntervalRef.current) {
         clearInterval(landingIntervalRef.current);
       }
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
     };
   }, []);
+
+  // Idle Hint Timer: triggers if player waits in IDLE for > 6.5 seconds
+  useEffect(() => {
+    if (stage === 'IDLE') {
+      idleTimerRef.current = setTimeout(() => {
+        setShowIdleHint(true);
+      }, 6500);
+    } else {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      setShowIdleHint(false);
+    }
+
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+    };
+  }, [stage]);
 
   // 2. Optical Motion & Fingertip Direction Tracking Loop
   useEffect(() => {
@@ -340,6 +371,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setControlWarning(null);
     setIsFoul(false);
     setFoulTimeLeft(2.0);
+    setShowIdleHint(false);
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
 
     // Clear any timers
     if (biteIntervalRef.current) {
@@ -779,6 +815,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       onCatchFish(caughtRecord);
     }
 
+    // Reset consecutive failures counter on successful catch
+    consecutiveFailsRef.current = 0;
+    setConsecutiveFails(0);
+
     setStage('CATCH_SUCCESS');
 
     confetti({
@@ -790,6 +830,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   const triggerLost = (reason?: string) => {
     isRoundFinishedRef.current = true;
+    consecutiveFailsRef.current += 1;
+    setConsecutiveFails(consecutiveFailsRef.current);
+
     if (biteIntervalRef.current) {
       clearInterval(biteIntervalRef.current);
       biteIntervalRef.current = null;
@@ -815,7 +858,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setStage('LOST');
     setTimeout(() => {
       setStage('IDLE');
-    }, 2400);
+    }, consecutiveFailsRef.current >= 2 ? 3200 : 2400);
   };
 
   return (
@@ -940,6 +983,43 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <div className="font-arcade text-emerald-400 text-xs sm:text-sm tracking-wider">
               ГОТОВНОСТЬ К ЗАБРОСУ
             </div>
+
+            {/* Assistance Hint if player waited > 6.5s in IDLE */}
+            {showIdleHint && (
+              <div className="p-3 bg-amber-950/90 border border-amber-400 text-amber-200 pixel-corners shadow-[0_0_20px_rgba(245,158,11,0.4)] animate-pulse space-y-1">
+                <div className="font-arcade text-xs flex items-center justify-center gap-1.5 text-amber-300">
+                  <Lightbulb className="w-4 h-4 text-amber-400" />
+                  <span>ПОДСКАЗКА: КАК НАЧАТЬ ИГРУ</span>
+                </div>
+                <div className="font-mono text-[9px] text-zinc-300">
+                  Кликните зеленую кнопку <span className="text-emerald-400 font-bold">[ЗАБРОСИТЬ УДОЧКУ]</span> ниже или нажмите клавишу <span className="text-amber-300 font-bold">[Пробел]</span>!
+                </div>
+              </div>
+            )}
+
+            {/* Assistance Guide if player failed >= 2 times in a row */}
+            {consecutiveFails >= 2 && (
+              <div className="p-3.5 bg-cyan-950/90 border border-cyan-400 pixel-corners text-left space-y-2 shadow-[0_0_25px_rgba(6,182,212,0.4)]">
+                <div className="font-arcade text-xs text-cyan-300 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Lightbulb className="w-4 h-4 text-cyan-400" />
+                    <span>СОВЕТЫ ПО ВЫВАЖИВАНИЮ (НЕ УДАЛОСЬ {consecutiveFails}x):</span>
+                  </div>
+                  <button 
+                    onClick={() => setIsGuideOpen(true)}
+                    className="text-[8px] font-arcade text-cyan-400 underline hover:text-white"
+                  >
+                    ПОЛНЫЙ ГАЙД
+                  </button>
+                </div>
+                
+                <div className="space-y-1 font-mono text-[9px] text-zinc-200">
+                  <div>• <span className="text-amber-300 font-bold">Не двигайте рукой</span> до поклевки (иначе штраф за фальстарт).</div>
+                  <div>• <span className="text-amber-300 font-bold">При надписи «КЛЮЕТ!»</span> резко дерните пальцем в камеру (окно 0.75с).</div>
+                  <div>• <span className="text-emerald-400 font-bold">Ведите пальцем за рыбой:</span> следите за бирюзовым прицелом ☝️ в окне камеры справа внизу.</div>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={handleCast}
@@ -1260,11 +1340,22 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
         {/* LOST Fish Alert */}
         {stage === 'LOST' && (
-          <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-2 pixel-corners animate-shake shadow-[0_0_40px_rgba(239,68,68,0.6)]">
+          <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-3 pixel-corners animate-shake shadow-[0_0_40px_rgba(239,68,68,0.6)] max-w-md w-full">
             <div className="text-lg">РЫБА СОРВАЛАСЬ!</div>
             <div className="text-xs text-zinc-300 font-mono">
               {lostReason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!'}
             </div>
+            {consecutiveFails >= 2 && (
+              <div className="p-2.5 bg-black/80 border border-amber-400 text-[9px] text-amber-200 font-mono text-left space-y-1">
+                <div className="font-arcade text-[10px] text-amber-300 flex items-center gap-1.5">
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                  <span>ПОДСКАЗКА (НЕ УДАЛОСЬ ВЫЛОВИТЬ {consecutiveFails} РАЗА):</span>
+                </div>
+                <div>• Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальстарт).</div>
+                <div>• При поклевке резко двиньте палец в камеру за 0.75с.</div>
+                <div>• В вываживании держите бирюзовый прицел ☝️ на рыбе.</div>
+              </div>
+            )}
           </div>
         )}
 
