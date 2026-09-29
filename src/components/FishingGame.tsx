@@ -175,7 +175,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (cameraEnabled) {
       setCameraStatus('CONNECTING');
       navigator.mediaDevices?.getUserMedia({ 
-        video: { width: { ideal: 480 }, height: { ideal: 360 }, facingMode: 'user' } 
+        video: { 
+          width: { ideal: 480 }, 
+          height: { ideal: 360 }, 
+          frameRate: { ideal: 60, min: 30 },
+          facingMode: 'user' 
+        }
       })
       .then((s) => {
         stream = s;
@@ -343,10 +348,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           handPosRef.current.x += (rawX - handPosRef.current.x) * 0.85;
           handPosRef.current.y += (rawY - handPosRef.current.y) * 0.85;
 
-          setHandPos({
-            x: Math.round(handPosRef.current.x),
-            y: Math.round(handPosRef.current.y)
-          });
+          const roundedHandX = Math.round(handPosRef.current.x);
+          const roundedHandY = Math.round(handPosRef.current.y);
+          setHandPos(prev => (prev.x === roundedHandX && prev.y === roundedHandY ? prev : { x: roundedHandX, y: roundedHandY }));
 
           // 1. FAULT TRIGGER: Early twitch in WAITING stage scares fish
           if (stage === 'WAITING' && avgMotion > 16) {
@@ -732,17 +736,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       fishPosRef.current.x = Math.max(6, Math.min(94, nextX));
       fishPosRef.current.y = Math.max(8, Math.min(92, nextY));
 
-      setFishPos({
-        x: Math.round(fishPosRef.current.x * 10) / 10,
-        y: Math.round(fishPosRef.current.y * 10) / 10
-      });
+      const roundedFishX = Math.round(fishPosRef.current.x * 2) / 2;
+      const roundedFishY = Math.round(fishPosRef.current.y * 2) / 2;
+      setFishPos(prev => (prev.x === roundedFishX && prev.y === roundedFishY ? prev : { x: roundedFishX, y: roundedFishY }));
 
       setIsLockedOn((prev) => (prev !== isLocked ? isLocked : prev));
 
       // 5. CUMULATIVE OFF-TARGET TIMEOUT (User Requirement: 1.5s cumulative across the round)
       if (!isLocked) {
         cumulativeOffTargetMsRef.current += deltaMs;
-        setOffTargetMs(Math.min(1500, cumulativeOffTargetMsRef.current));
+        const roundedOff = Math.round(cumulativeOffTargetMsRef.current / 40) * 40;
+        setOffTargetMs(prev => (prev === roundedOff ? prev : roundedOff));
 
         if (cumulativeOffTargetMsRef.current >= 1500) {
           isRoundFinishedRef.current = true;
