@@ -25,7 +25,7 @@ interface FishingGameProps {
   setTab?: (tab: TabType) => void;
 }
 
-type GameStage = 'IDLE' | 'CASTING' | 'WAITING' | 'BITE' | 'REELING' | 'CATCH_SUCCESS' | 'LOST';
+type GameStage = 'IDLE' | 'CASTING' | 'WAITING' | 'BITE' | 'REELING' | 'LANDING' | 'CATCH_SUCCESS' | 'LOST';
 
 interface Position2D {
   x: number; // 0 to 100 percentage
@@ -54,6 +54,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [screenShake, setScreenShake] = useState(false);
   const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
   const [lostReason, setLostReason] = useState<string | null>(null);
+
+  // 1.0s Rapid Acceptance Window State
+  const [landingTimeLeft, setLandingTimeLeft] = useState(1.0);
+  const landingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Guard refs to prevent duplicate catch bug!
   const isRoundFinishedRef = useRef(false);
@@ -184,6 +188,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       if (biteTimeoutRef.current) {
         clearTimeout(biteTimeoutRef.current);
       }
+      if (landingIntervalRef.current) {
+        clearInterval(landingIntervalRef.current);
+      }
     };
   }, []);
 
@@ -281,6 +288,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           else if (stage === 'BITE' && avgMotion > 22) {
             handleStrike();
           }
+          // Camera Gesture 3: Accept catch on motion
+          else if (stage === 'LANDING' && avgMotion > 18) {
+            handleAcceptCatch();
+          }
         }
       }
 
@@ -311,14 +322,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         setTargetFish(rolled);
         setStage('BITE');
 
-        // Failure Mode 2: Bite window timeout (3.2 seconds) before fish steals bait!
+        // Failure Mode 2: Bite window timeout (1.5 seconds) before fish steals bait!
         if (biteTimeoutRef.current) clearTimeout(biteTimeoutRef.current);
         biteTimeoutRef.current = setTimeout(() => {
           if (!isRoundFinishedRef.current) {
             sound.playSnap();
-            triggerLost('ВРЕМЯ ВЫШЛО! Вы не успели подсечь рыбу за 3.2 секунды!');
+            triggerLost('ВРЕМЯ ВЫШЛО! Вы не успели подсечь рыбу за 1.5 секунды!');
           }
-        }, 3200);
+        }, 1500);
       }, biteDelay);
     }, 900);
   };
@@ -468,11 +479,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       // Keep smooth float in state for buttery rendering
       setCatchProgress(Math.round(currentProgressRef.current * 10) / 10);
 
-      // 7. CATCH SUCCESS OR ZERO-PROGRESS LOST TRIGGER
+      // 7. CATCH LANDING (1.0s acceptance window) OR ZERO-PROGRESS LOST TRIGGER
       if (currentProgressRef.current >= 100) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
-        triggerCatchSuccess();
+        triggerLandingPhase();
       } else if (currentProgressRef.current <= 0) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
@@ -485,6 +496,42 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     return () => clearInterval(loop);
   }, [stage, targetFish, diffParams]);
 
+  // 1.0-Second Landing Acceptance Window (User Requirement: must accept within 1s or lose fish!)
+  const triggerLandingPhase = () => {
+    sound.playReelClick();
+    setStage('LANDING');
+    setLandingTimeLeft(1.0);
+
+    const deadline = Date.now() + 1000;
+    if (landingIntervalRef.current) clearInterval(landingIntervalRef.current);
+
+    landingIntervalRef.current = setInterval(() => {
+      const remaining = Math.max(0, (deadline - Date.now()) / 1000);
+      setLandingTimeLeft(Math.round(remaining * 100) / 100);
+
+      if (remaining <= 0) {
+        if (landingIntervalRef.current) {
+          clearInterval(landingIntervalRef.current);
+          landingIntervalRef.current = null;
+        }
+        if (!hasAwardedRef.current) {
+          isRoundFinishedRef.current = true;
+          sound.playSnap();
+          triggerLost('ВЫ НЕ УСПЕЛИ ПРИНЯТЬ РЫБУ ЗА 1 СЕКУНДУ! Добыча выскользнула из рук в океан!');
+        }
+      }
+    }, 20);
+  };
+
+  const handleAcceptCatch = () => {
+    if (stage !== 'LANDING' || hasAwardedRef.current) return;
+    if (landingIntervalRef.current) {
+      clearInterval(landingIntervalRef.current);
+      landingIntervalRef.current = null;
+    }
+    triggerCatchSuccess();
+  };
+
   // NO KEYBOARD REELING: Block keyboard during reeling and show prompt
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -494,6 +541,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       } else if (stage === 'BITE' && e.code === 'Space') {
         e.preventDefault();
         handleStrike();
+      } else if (stage === 'LANDING' && (e.code === 'Space' || e.code === 'Enter')) {
+        e.preventDefault();
+        handleAcceptCatch();
       } else if (stage === 'REELING') {
         // Remind player that reeling is physical (pointing finger in camera)
         if (['Space', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
@@ -514,6 +564,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       handleStrike();
       return;
     }
+    if (stage === 'LANDING') {
+      handleAcceptCatch();
+      return;
+    }
     if (stage === 'REELING') {
       // Screen tapped or clicked: remind player that controls are 100% via camera gestures
       setControlWarning('☝️ УПРАВЛЕНИЕ ТОЛЬКО ЧЕРЕЗ КАМЕРУ! НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В ОБЪЕКТИВЕ!');
@@ -529,6 +583,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
+    }
+    if (landingIntervalRef.current) {
+      clearInterval(landingIntervalRef.current);
+      landingIntervalRef.current = null;
     }
 
     const isArcane = targetFish.rarity === 'ARCANE';
@@ -583,6 +641,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
+    }
+    if (landingIntervalRef.current) {
+      clearInterval(landingIntervalRef.current);
+      landingIntervalRef.current = null;
     }
     setLostReason(reason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!');
     setStage('LOST');
@@ -773,6 +835,51 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </div>
             <div className="inline-block py-2.5 px-6 bg-amber-400 text-black font-arcade text-xs font-bold border-2 border-white">
               [ ПОДСЕЧЬ РЫБУ ]
+            </div>
+          </div>
+        )}
+
+        {/* LANDING Phase: 1.0s Rapid Accept QTE */}
+        {stage === 'LANDING' && (
+          <div 
+            onClick={handleAcceptCatch}
+            className="pointer-events-auto cursor-pointer p-6 sm:p-8 bg-[#04120a]/95 border-4 border-amber-400 text-center shadow-[0_0_60px_rgba(245,158,11,0.8)] pixel-corners space-y-4 max-w-lg w-full animate-bounce"
+          >
+            <div className="font-arcade text-lg sm:text-xl text-amber-300 tracking-wider flex items-center justify-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-400 animate-spin" />
+              <span>! РЫБА НА ПОВЕРХНОСТИ !</span>
+            </div>
+
+            <div className="font-arcade text-xs text-emerald-300">
+              БЫСТРО ПРИМИТЕ РЫБУ, ИНАЧЕ ОНА ВЫСКОЛЬЗНЕТ!
+            </div>
+
+            {/* 1.0s Live Shrinking Bar */}
+            <div className="space-y-1">
+              <div className="flex justify-between font-arcade text-[10px]">
+                <span className="text-red-400 font-bold animate-pulse">ОКНО ПРИЕМА ТРОФЕЯ:</span>
+                <span className="text-amber-300 font-bold text-xs">{landingTimeLeft.toFixed(2)}с / 1.00с</span>
+              </div>
+              <div className="w-full h-3 bg-black border border-amber-400 p-0.5 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-red-500 via-amber-400 to-emerald-400 transition-all duration-75"
+                  style={{ width: `${Math.max(0, Math.min(100, (landingTimeLeft / 1.0) * 100))}%` }}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAcceptCatch();
+              }}
+              className="w-full py-4 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-black font-arcade text-xs sm:text-sm font-bold border-2 border-white shadow-[0_0_30px_rgba(16,185,129,0.9)] animate-pulse tracking-widest"
+            >
+              [ ПРИНЯТЬ РЫБУ В САДОК ]
+            </button>
+
+            <div className="text-[9px] font-arcade text-zinc-400">
+              💡 Нажмите кнопку, пробел или сделайте взмах рукой в камере!
             </div>
           </div>
         )}
@@ -1078,8 +1185,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
           <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах рукой вверх перед камерой или кнопка «Забросить»</div>
-          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при сигнале поклевки (окно 3 сек)</div>
-          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Наводите указательный палец в камере прямо на рыбу</div>
+          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при поклевке (окно 1.5 сек)</div>
+          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
+          <div><span className="text-rose-400">[ПРИЕМ]</span> Быстро подтвердите улов (окно ровно 1.0 сек, иначе срыв!)</div>
         </div>
 
         {/* Right: Persistent Live Camera Viewfinder Window */}
