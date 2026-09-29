@@ -72,23 +72,23 @@ const AVAILABLE_AVATARS = [
   {
     id: 'megalodon',
     name: 'Древний Мегалодон',
-    role: 'ЭПИЧЕСКИЙ ХИЩНИК',
+    role: 'МИФИЧЕСКИЙ СВЕРХХИЩНИК',
     src: '/assets/card_megalodon.jpg',
-    rarity: 'EPIC',
-    color: '#f59e0b'
+    rarity: 'MYTHIC',
+    color: '#f43f5e'
   },
   {
     id: 'anglerfish',
     name: 'Глубоководный Удильщик',
-    role: 'ОХОТНИК ТЕМНОТЫ',
+    role: 'ЭПИЧЕСКИЙ ОХОТНИК ТЕМНОТЫ',
     src: '/assets/card_anglerfish.jpg',
     rarity: 'EPIC',
-    color: '#eab308'
+    color: '#a855f7'
   },
   {
     id: 'goldfish',
     name: 'Золотая Рыбка',
-    role: 'МИФИЧЕСКИЙ ТРОФЕЙ',
+    role: 'РЕДКИЙ ТРОФЕЙ',
     src: '/assets/card_goldfish.jpg',
     rarity: 'RARE',
     color: '#fbbf24'

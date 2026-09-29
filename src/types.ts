@@ -1,7 +1,7 @@
 export type TabType = 'landing' | 'auth' | 'fishing';
 
 // ARCANE is the highest tier, above GODLY and SECRET
-export type RarityType = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'SECRET' | 'GODLY' | 'ARCANE';
+export type RarityType = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'MYTHIC' | 'SECRET' | 'GODLY' | 'ARCANE';
 
 export interface FishItem {
   id: string;

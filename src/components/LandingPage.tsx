@@ -270,12 +270,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
               <div className="w-10 h-10 bg-amber-500/20 border border-amber-400 flex items-center justify-center font-arcade text-sm text-amber-300">
                 03
               </div>
-              <h3 className="font-arcade text-xs text-white">ВЫВАЖИВАНИЕ ВЫСОТОЙ РУКИ</h3>
+              <h3 className="font-arcade text-xs text-white">ВЫВАЖИВАНИЕ: ПРИЦЕЛ ПАЛЬЦА</h3>
               <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                Поднимай ладонь выше в кадре, чтобы поднимать зеленую планку натяжения, или опускай для спуска. Удерживай рыбу в зеленой зоне!
+                Наводи указательный палец в камеру и удерживай прицел прямо на рыбе! Если палец сойдет с цели более чем на 1.5 секунды суммарно — леска оборвется.
               </p>
               <div className="px-2 py-1 bg-black/60 border border-amber-500/30 font-arcade text-[9px] text-amber-400 inline-block">
-                БАЛАНС: ПОЛОЖЕНИЕ ЛАДОНИ В КАДРЕ
+                ТОЧНОСТЬ: ПАЛЕЦ НА РЫБЕ (ЗАПАС 1.5 СЕК)
               </div>
             </div>
 

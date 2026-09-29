@@ -60,14 +60,14 @@ export const FISH_DATABASE: FishItem[] = [
   {
     id: 'megalodon',
     name: 'ДОИСТОРИЧЕСКИЙ МЕГАЛОДОН',
-    rarity: 'EPIC',
-    color: '#f59e0b',
+    rarity: 'MYTHIC',
+    color: '#f43f5e',
     cardImage: '/assets/card_megalodon.jpg',
     catchVideo: '/assets/video_catch_megalodon.mp4',
     weightMin: 140.0,
     weightMax: 480.0,
-    basePrice: 9500,
-    description: 'Древний сверххищник морей. Ломает карбоновые удилища пополам при малейшей ошибке натяжения.',
+    basePrice: 12500,
+    description: 'Древний мифический сверххищник морей. Невероятно стремительный колосс, мгновенно рвущий леску при малейшей ошибке.',
     catchDifficulty: 4,
     catchChance: 4.5
   },
@@ -120,7 +120,7 @@ export const rollFish = (): FishItem => {
   if (roll < 0.2) return FISH_DATABASE[7]; // ARCANE (0.2%)
   if (roll < 1.0) return FISH_DATABASE[6]; // GODLY (0.8%)
   if (roll < 3.0) return FISH_DATABASE[5]; // SECRET (2.0%)
-  if (roll < 7.5) return FISH_DATABASE[4]; // EPIC Megalodon (4.5%)
+  if (roll < 7.5) return FISH_DATABASE[4]; // MYTHIC Megalodon (4.5%)
   if (roll < 16.0) return FISH_DATABASE[3]; // EPIC Anglerfish (8.5%)
   if (roll < 32.0) return FISH_DATABASE[2]; // RARE Goldfish (16.0%)
   if (roll < 60.0) return FISH_DATABASE[1]; // UNCOMMON Salmon (28.0%)

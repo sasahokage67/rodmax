@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AnglerProfile, FishItem, CaughtFish, TabType } from '../types';
+import { AnglerProfile, FishItem, CaughtFish, TabType, RarityType } from '../types';
 import { FISH_DATABASE, rollFish } from '../data/fishDatabase';
 import { sound } from '../audio';
 import confetti from 'canvas-confetti';
@@ -50,13 +50,19 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [fishPos, setFishPos] = useState<Position2D>({ x: 50, y: 50 });
   const [handPos, setHandPos] = useState<Position2D>({ x: 50, y: 50 });
   const [isLockedOn, setIsLockedOn] = useState(false);
-  const [catchProgress, setCatchProgress] = useState(50); // Starts midway (50%)
+  const [catchProgress, setCatchProgress] = useState(50);
   const [screenShake, setScreenShake] = useState(false);
+  const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
+  const [lostReason, setLostReason] = useState<string | null>(null);
 
   // Guard refs to prevent duplicate catch bug!
   const isRoundFinishedRef = useRef(false);
   const hasAwardedRef = useRef(false);
   const biteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cumulative Off-Target Timeout: snaps if total off-target time reaches 1500ms
+  const cumulativeOffTargetMsRef = useRef(0);
+  const lastTickTimeRef = useRef(Date.now());
 
   // Physics refs
   const fishPosRef = useRef<Position2D>({ x: 50, y: 50 });
@@ -76,32 +82,50 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Simulated depth
   const [depth, setDepth] = useState(45);
 
+  // Initial progress by rarity tier
+  const getInitialProgress = (rarity: RarityType) => {
+    switch (rarity) {
+      case 'COMMON': return 50;
+      case 'UNCOMMON': return 45;
+      case 'RARE': return 40;
+      case 'EPIC': return 35;
+      case 'MYTHIC': return 30;
+      case 'SECRET': return 25;
+      case 'GODLY': return 20;
+      case 'ARCANE': return 15;
+      default: return 35;
+    }
+  };
+
   // Scaled Difficulty Parameters based on Fish Rarity
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
-        // Boot: very large radius (36%), slow wander, rapid catch (0.8s)
-        return { targetRadius: 36, swimSpeed: 0.03, gain: 3.5, loss: 0.35, changeInterval: 55, evasion: 0 };
+        // Boot: huge radius, gentle glide, fast easy catch
+        return { targetRadius: 36, swimSpeed: 0.05, gain: 2.2, loss: 0.35, changeInterval: 50, evasion: 0 };
       case 'UNCOMMON':
-        // Salmon: broad radius (28%), steady swim, quick catch (1.1s)
-        return { targetRadius: 28, swimSpeed: 0.055, gain: 2.8, loss: 0.42, changeInterval: 42, evasion: 0.02 };
+        // Salmon: broad radius, steady swim
+        return { targetRadius: 28, swimSpeed: 0.09, gain: 1.8, loss: 0.45, changeInterval: 38, evasion: 0.04 };
       case 'RARE':
-        // Goldfish: medium radius (22%), agile glide, catch in ~1.4s
-        return { targetRadius: 22, swimSpeed: 0.08, gain: 2.3, loss: 0.48, changeInterval: 32, evasion: 0.05 };
+        // Goldfish: medium radius, lively darting
+        return { targetRadius: 22, swimSpeed: 0.15, gain: 1.4, loss: 0.55, changeInterval: 28, evasion: 0.10 };
       case 'EPIC':
-        // Anglerfish, Megalodon: tighter radius (17%), fast turns, evasion bursts
-        return { targetRadius: 17, swimSpeed: 0.12, gain: 1.9, loss: 0.55, changeInterval: 24, evasion: 0.10 };
+        // Anglerfish: compact radius, fast turns, evasion
+        return { targetRadius: 16, swimSpeed: 0.24, gain: 1.1, loss: 0.70, changeInterval: 20, evasion: 0.20 };
+      case 'MYTHIC':
+        // Megalodon: tight radius (12%), fast predator, fierce evasion and bursts
+        return { targetRadius: 12, swimSpeed: 0.36, gain: 0.85, loss: 0.85, changeInterval: 14, evasion: 0.35 };
       case 'SECRET':
-        // Abyssal Leviathan: small radius (14%), high speed sweeps
-        return { targetRadius: 14, swimSpeed: 0.16, gain: 1.7, loss: 0.60, changeInterval: 18, evasion: 0.15 };
+        // Abyssal Leviathan: small radius (10%), rapid sweeps, heavy feints
+        return { targetRadius: 10, swimSpeed: 0.46, gain: 0.70, loss: 1.0, changeInterval: 10, evasion: 0.45 };
       case 'GODLY':
-        // Celestial Whale: compact radius (12%), fast zigzag maneuvers
-        return { targetRadius: 12, swimSpeed: 0.19, gain: 1.5, loss: 0.65, changeInterval: 14, evasion: 0.20 };
+        // Celestial Whale: tiny radius (8%), high speed darting, aggressive evasion
+        return { targetRadius: 8, swimSpeed: 0.58, gain: 0.55, loss: 1.2, changeInterval: 8, evasion: 0.60 };
       case 'ARCANE':
-        // Neon Jellyfish: pinpoint radius (10%), maximum agility & aggressive evasion
-        return { targetRadius: 10, swimSpeed: 0.23, gain: 1.4, loss: 0.70, changeInterval: 10, evasion: 0.26 };
+        // Neon Jellyfish: pinpoint radius (6.5%), supreme agility, lightning evasive bursts
+        return { targetRadius: 6.5, swimSpeed: 0.72, gain: 0.45, loss: 1.4, changeInterval: 5, evasion: 0.80 };
       default:
-        return { targetRadius: 22, swimSpeed: 0.08, gain: 2.3, loss: 0.48, changeInterval: 32, evasion: 0.05 };
+        return { targetRadius: 20, swimSpeed: 0.15, gain: 1.4, loss: 0.55, changeInterval: 28, evasion: 0.10 };
     }
   };
 
@@ -292,7 +316,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         biteTimeoutRef.current = setTimeout(() => {
           if (!isRoundFinishedRef.current) {
             sound.playSnap();
-            triggerLost();
+            triggerLost('ВРЕМЯ ВЫШЛО! Вы не успели подсечь рыбу за 3.2 секунды!');
           }
         }, 3200);
       }, biteDelay);
@@ -316,21 +340,35 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     fishPosRef.current = { x: 50, y: 50 };
     fishTargetRef.current = { x: 50, y: 50 };
     fishTimerRef.current = 0;
-    currentProgressRef.current = 50;
+
+    // Dynamic starting progress by rarity tier
+    const startProgress = getInitialProgress(targetFish.rarity);
+    currentProgressRef.current = startProgress;
+    setCatchProgress(startProgress);
+
+    // Reset cumulative off-target timer (1.5s tolerance)
+    cumulativeOffTargetMsRef.current = 0;
+    setOffTargetMs(0);
+    lastTickTimeRef.current = Date.now();
 
     setFishPos({ x: 50, y: 50 });
-    setCatchProgress(50); // Starts comfortably midway at 50%
     setIsLockedOn(false);
     setControlWarning(null);
     setStage('REELING');
   };
 
-  // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion!
+  // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion & 1.5s Cumulative Snap!
   useEffect(() => {
     if (stage !== 'REELING') return;
 
+    lastTickTimeRef.current = Date.now();
+
     const loop = setInterval(() => {
       if (isRoundFinishedRef.current) return;
+
+      const now = Date.now();
+      const deltaMs = Math.min(100, Math.max(10, now - lastTickTimeRef.current));
+      lastTickTimeRef.current = now;
 
       // 1. LIVELY FISH SWIMMING MOVEMENT INSIDE EXPANDED ARENA BOUNDS
       fishTimerRef.current--;
@@ -340,14 +378,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           x: 8 + Math.random() * 84,
           y: 10 + Math.random() * 80
         };
-        fishTimerRef.current = diffParams.changeInterval + Math.floor(Math.random() * 8);
+        fishTimerRef.current = diffParams.changeInterval + Math.floor(Math.random() * 6);
       }
 
-      // Smooth glide towards destination with subtle water wave
+      // Fast responsive vector movement towards target
       const dx = fishTargetRef.current.x - fishPosRef.current.x;
       const dy = fishTargetRef.current.y - fishPosRef.current.y;
-      const waveX = Math.sin(Date.now() / 280) * 0.85;
-      const waveY = Math.cos(Date.now() / 320) * 0.85;
+      const distToTarget = Math.hypot(dx, dy);
+
+      // Real velocity step with speed multiplier
+      const moveStep = Math.min(distToTarget, diffParams.swimSpeed * 11);
+      const angle = Math.atan2(dy, dx);
+
+      const waveX = Math.sin(now / 200) * (diffParams.swimSpeed * 3.5);
+      const waveY = Math.cos(now / 230) * (diffParams.swimSpeed * 3.5);
 
       // 2. ACTIVE PLAYER POSITION (Exclusively Webcam Fingertip Tracking)
       const activePlayerPos: Position2D = handPosRef.current;
@@ -363,22 +407,25 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       let evasionY = 0;
       if (isLocked && diffParams.evasion > 0) {
         const safeDist = distance || 1;
-        // Repulsion vector pushing fish away from player's finger
-        evasionX = - (distX / safeDist) * diffParams.evasion * 16;
-        evasionY = - (distY / safeDist) * diffParams.evasion * 16;
+        // Strong repulsion vector pushing fish away from player's finger
+        evasionX = - (distX / safeDist) * diffParams.evasion * 20;
+        evasionY = - (distY / safeDist) * diffParams.evasion * 20;
 
         // High rarity agile feints (sudden dart bursts across the arena)
-        if (diffParams.evasion >= 0.12 && Math.random() < 0.04) {
+        if (diffParams.evasion >= 0.15 && Math.random() < 0.08) {
           fishTargetRef.current = {
-            x: 10 + Math.random() * 80,
-            y: 12 + Math.random() * 76
+            x: 8 + Math.random() * 84,
+            y: 10 + Math.random() * 80
           };
         }
       }
 
       // Apply dynamic velocity with arena boundary protection
-      fishPosRef.current.x = Math.max(6, Math.min(94, fishPosRef.current.x + dx * diffParams.swimSpeed + waveX + evasionX));
-      fishPosRef.current.y = Math.max(8, Math.min(92, fishPosRef.current.y + dy * diffParams.swimSpeed + waveY + evasionY));
+      const nextX = fishPosRef.current.x + Math.cos(angle) * moveStep + waveX + evasionX;
+      const nextY = fishPosRef.current.y + Math.sin(angle) * moveStep + waveY + evasionY;
+
+      fishPosRef.current.x = Math.max(6, Math.min(94, nextX));
+      fishPosRef.current.y = Math.max(8, Math.min(92, nextY));
 
       setFishPos({
         x: Math.round(fishPosRef.current.x * 10) / 10,
@@ -387,27 +434,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       setIsLockedOn(isLocked);
 
-      // 5. PROGRESS CALCULATION (Fast, punchy fill rate — 0.8s to 2.5s catch time)
+      // 5. CUMULATIVE OFF-TARGET TIMEOUT (User Requirement: 1.5s cumulative across the round)
+      if (!isLocked) {
+        cumulativeOffTargetMsRef.current += deltaMs;
+        setOffTargetMs(Math.min(1500, cumulativeOffTargetMsRef.current));
+
+        if (cumulativeOffTargetMsRef.current >= 1500) {
+          isRoundFinishedRef.current = true;
+          clearInterval(loop);
+          sound.playSnap();
+          triggerLost('ЛЕСКА ПОРВАНА: палец был вне рыбы суммарно более 1.5 секунды!');
+          return;
+        }
+      }
+
+      // 6. PROGRESS CALCULATION (Smooth decimal fill)
       if (isLocked) {
         setScreenShake(false);
         sound.playReelClick();
         currentProgressRef.current = Math.min(100, currentProgressRef.current + diffParams.gain);
       } else {
         setScreenShake(true);
-        const now = Date.now();
-        if (now - lastWarningSoundTime.current > 550) {
+        if (now - lastWarningSoundTime.current > 420) {
           sound.playWarning();
           lastWarningSoundTime.current = now;
           if (typeof navigator !== 'undefined' && navigator.vibrate) {
-            navigator.vibrate(15);
+            navigator.vibrate(20);
           }
         }
         currentProgressRef.current = Math.max(0, currentProgressRef.current - diffParams.loss);
       }
 
-      setCatchProgress(Math.round(currentProgressRef.current));
+      // Keep smooth float in state for buttery rendering
+      setCatchProgress(Math.round(currentProgressRef.current * 10) / 10);
 
-      // 6. CATCH SUCCESS OR LOST TRIGGER (Guarded outside state updaters!)
+      // 7. CATCH SUCCESS OR ZERO-PROGRESS LOST TRIGGER
       if (currentProgressRef.current >= 100) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
@@ -416,10 +477,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         isRoundFinishedRef.current = true;
         clearInterval(loop);
         sound.playSnap();
-        triggerLost();
+        triggerLost('ОБРЫВ: натяжение лески упало до 0%!');
       }
 
-    }, 45);
+    }, 35);
 
     return () => clearInterval(loop);
   }, [stage, targetFish, diffParams]);
@@ -482,9 +543,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       UNCOMMON: 65,
       RARE: 140,
       EPIC: 320,
-      SECRET: 800,
-      GODLY: 1600,
-      ARCANE: 4000
+      MYTHIC: 550,
+      SECRET: 950,
+      GODLY: 1800,
+      ARCANE: 4500
     };
     const rawExp = Math.round(
       (baseExpMap[targetFish.rarity] || 40) * 
@@ -517,15 +579,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     });
   };
 
-  const triggerLost = () => {
+  const triggerLost = (reason?: string) => {
     if (biteTimeoutRef.current) {
       clearTimeout(biteTimeoutRef.current);
       biteTimeoutRef.current = null;
     }
+    setLostReason(reason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!');
     setStage('LOST');
     setTimeout(() => {
       setStage('IDLE');
-    }, 2200);
+    }, 2400);
   };
 
   return (
@@ -738,19 +801,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 </div>
               </div>
 
-              {/* Progress Bar */}
-              <div className="space-y-1">
-                <div className="flex justify-between font-arcade text-[9px]">
-                  <span className="text-zinc-400">ПРОГРЕСС ВЫВАЖИВАНИЯ:</span>
-                  <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
-                    {catchProgress}% / 100%
-                  </span>
+              {/* Progress Bar & Stability Tension Meter */}
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <div className="flex justify-between font-arcade text-[9px]">
+                    <span className="text-zinc-400">ПРОГРЕСС ВЫВАЖИВАНИЯ:</span>
+                    <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                      {Math.round(catchProgress)}% / 100%
+                    </span>
+                  </div>
+                  <div className="w-full h-3.5 bg-black border border-emerald-500 p-0.5 overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-[width] duration-75 ease-linear"
+                      style={{ width: `${Math.min(100, Math.max(0, catchProgress)).toFixed(1)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-3.5 bg-black border border-emerald-500 p-0.5">
-                  <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 transition-all duration-100 shadow-[0_0_12px_rgba(52,211,153,0.5)]"
-                    style={{ width: `${catchProgress}%` }}
-                  />
+
+                {/* Cumulative 1.5s Off-Target Tolerance Gauge */}
+                <div className="space-y-1 pt-1 border-t border-emerald-500/20">
+                  <div className="flex justify-between font-arcade text-[8px]">
+                    <span className={offTargetMs > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}>
+                      {offTargetMs > 0 ? `⚠️ СХОД ЦЕЛИ (НАКОПЛЕНИЕ): ${(offTargetMs / 1000).toFixed(2)}с / 1.50с` : '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)'}
+                    </span>
+                    <span className={offTargetMs > 1000 ? 'text-red-400 font-bold' : offTargetMs > 500 ? 'text-amber-400' : 'text-emerald-400'}>
+                      ЗАПАС: {Math.max(0, (1500 - offTargetMs) / 1000).toFixed(2)}с
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-black border border-zinc-700 p-0.5 overflow-hidden">
+                    <div 
+                      className={`h-full transition-[width] duration-75 ease-linear ${
+                        offTargetMs > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : offTargetMs > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(100, (offTargetMs / 1500) * 100).toFixed(1)}%` }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -883,7 +968,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {stage === 'LOST' && (
           <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-2 pixel-corners animate-shake shadow-[0_0_40px_rgba(239,68,68,0.6)]">
             <div className="text-lg">РЫБА СОРВАЛАСЬ!</div>
-            <div className="text-xs text-zinc-300">Леска сорвалась. В следующий раз держите руку точнее над рыбой!</div>
+            <div className="text-xs text-zinc-300 font-mono">
+              {lostReason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!'}
+            </div>
           </div>
         )}
 
