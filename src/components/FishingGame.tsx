@@ -56,6 +56,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Guard refs to prevent duplicate catch bug!
   const isRoundFinishedRef = useRef(false);
   const hasAwardedRef = useRef(false);
+  const biteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Physics refs
   const fishPosRef = useRef<Position2D>({ x: 50, y: 50 });
@@ -79,24 +80,28 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
-        // Boot: very easy, large target, slow wander
-        return { targetRadius: 28, swimSpeed: 0.035, gain: 1.5, loss: 0.35, changeInterval: 50 };
+        // Boot: very large radius (36%), slow wander, rapid catch (0.8s)
+        return { targetRadius: 36, swimSpeed: 0.03, gain: 3.5, loss: 0.35, changeInterval: 55, evasion: 0 };
       case 'UNCOMMON':
-        // Salmon: steady swim, good radius
-        return { targetRadius: 24, swimSpeed: 0.05, gain: 1.35, loss: 0.42, changeInterval: 42 };
+        // Salmon: broad radius (28%), steady swim, quick catch (1.1s)
+        return { targetRadius: 28, swimSpeed: 0.055, gain: 2.8, loss: 0.42, changeInterval: 42, evasion: 0.02 };
       case 'RARE':
-        // Goldfish: slightly faster, moderate radius
-        return { targetRadius: 20, swimSpeed: 0.07, gain: 1.2, loss: 0.48, changeInterval: 35 };
+        // Goldfish: medium radius (22%), agile glide, catch in ~1.4s
+        return { targetRadius: 22, swimSpeed: 0.08, gain: 2.3, loss: 0.48, changeInterval: 32, evasion: 0.05 };
       case 'EPIC':
-        // Anglerfish, Megalodon: swift turns, tighter radius
-        return { targetRadius: 16, swimSpeed: 0.095, gain: 1.05, loss: 0.55, changeInterval: 28 };
+        // Anglerfish, Megalodon: tighter radius (17%), fast turns, evasion bursts
+        return { targetRadius: 17, swimSpeed: 0.12, gain: 1.9, loss: 0.55, changeInterval: 24, evasion: 0.10 };
       case 'SECRET':
+        // Abyssal Leviathan: small radius (14%), high speed sweeps
+        return { targetRadius: 14, swimSpeed: 0.16, gain: 1.7, loss: 0.60, changeInterval: 18, evasion: 0.15 };
       case 'GODLY':
+        // Celestial Whale: compact radius (12%), fast zigzag maneuvers
+        return { targetRadius: 12, swimSpeed: 0.19, gain: 1.5, loss: 0.65, changeInterval: 14, evasion: 0.20 };
       case 'ARCANE':
-        // Supreme Leviathans: high precision, agile feints
-        return { targetRadius: 13, swimSpeed: 0.125, gain: 0.9, loss: 0.65, changeInterval: 22 };
+        // Neon Jellyfish: pinpoint radius (10%), maximum agility & aggressive evasion
+        return { targetRadius: 10, swimSpeed: 0.23, gain: 1.4, loss: 0.70, changeInterval: 10, evasion: 0.26 };
       default:
-        return { targetRadius: 20, swimSpeed: 0.06, gain: 1.2, loss: 0.45, changeInterval: 35 };
+        return { targetRadius: 22, swimSpeed: 0.08, gain: 2.3, loss: 0.48, changeInterval: 32, evasion: 0.05 };
     }
   };
 
@@ -149,7 +154,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }
   }, [cameraStatus, cameraEnabled]);
 
-  // 2. Optical Motion & 2D Hand Centroid Tracking Loop
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (biteTimeoutRef.current) {
+        clearTimeout(biteTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // 2. Optical Motion & Fingertip Direction Tracking Loop
   useEffect(() => {
     if (cameraStatus !== 'ACTIVE') return;
 
@@ -175,12 +189,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let weightedY = 0;
         let motionPoints = 0;
 
+        // Fingertip detection: track the topmost active motion cluster (leading finger pointing upwards)
+        let minY = 48;
+        let tipMotionSumX = 0;
+        let tipMotionCount = 0;
+
         for (let i = 0; i < data.length; i += 4) {
           const lumNow = (data[i] + data[i+1] + data[i+2]) / 3;
           const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
           const diff = Math.abs(lumNow - lumPrev);
 
-          if (diff > 24) {
+          if (diff > 22) {
             diffSum += diff;
             const pixelIdx = i / 4;
             const x = pixelIdx % 64;
@@ -188,20 +207,42 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             weightedX += x;
             weightedY += y;
             motionPoints++;
+
+            // Detect top-most finger points (finger pointing up towards camera)
+            if (y < minY) {
+              minY = y;
+              tipMotionSumX = x;
+              tipMotionCount = 1;
+            } else if (y <= minY + 3) {
+              tipMotionSumX += x;
+              tipMotionCount++;
+            }
           }
         }
 
         const avgMotion = Math.min(100, Math.floor(diffSum / 120));
         setMotionIntensity(avgMotion);
 
-        if (motionPoints > 12) {
-          // Mirrored screen coordinate: user moving their hand to the right on screen
-          const rawX = (1 - (weightedX / motionPoints) / 64) * 100;
-          const rawY = ((weightedY / motionPoints) / 48) * 100;
+        if (motionPoints > 10) {
+          // Centroid coordinates (mirrored X)
+          const centroidX = (1 - (weightedX / motionPoints) / 64) * 100;
+          const centroidY = ((weightedY / motionPoints) / 48) * 100;
+
+          let rawX = centroidX;
+          let rawY = centroidY;
+
+          // Focus on fingertip: leading topmost motion cluster
+          if (tipMotionCount > 0) {
+            const tipX = (1 - (tipMotionSumX / tipMotionCount) / 64) * 100;
+            const tipY = ((minY + 1.5) / 48) * 100;
+            // 65% fingertip + 35% centroid for pinpoint pointing precision and low jitter
+            rawX = tipX * 0.65 + centroidX * 0.35;
+            rawY = tipY * 0.65 + centroidY * 0.35;
+          }
 
           // Smooth low-pass filter
-          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.38;
-          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.38;
+          handPosRef.current.x += (rawX - handPosRef.current.x) * 0.45;
+          handPosRef.current.y += (rawY - handPosRef.current.y) * 0.45;
 
           setHandPos({
             x: Math.round(handPosRef.current.x),
@@ -245,6 +286,15 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         const rolled = rollFish();
         setTargetFish(rolled);
         setStage('BITE');
+
+        // Failure Mode 2: Bite window timeout (3.2 seconds) before fish steals bait!
+        if (biteTimeoutRef.current) clearTimeout(biteTimeoutRef.current);
+        biteTimeoutRef.current = setTimeout(() => {
+          if (!isRoundFinishedRef.current) {
+            sound.playSnap();
+            triggerLost();
+          }
+        }, 3200);
       }, biteDelay);
     }, 900);
   };
@@ -252,6 +302,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Strike Handler
   const handleStrike = () => {
     if (stage !== 'BITE') return;
+    if (biteTimeoutRef.current) {
+      clearTimeout(biteTimeoutRef.current);
+      biteTimeoutRef.current = null;
+    }
     sound.playReelClick();
     
     // Reset round guards to prevent duplicate catches!
@@ -271,39 +325,31 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setStage('REELING');
   };
 
-  // 3. REELING TICK LOOP: Direct "Hand on Fish" / "Finger on Fish" Mechanic!
+  // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion!
   useEffect(() => {
     if (stage !== 'REELING') return;
 
     const loop = setInterval(() => {
       if (isRoundFinishedRef.current) return;
 
-      // 1. ORGANIC FISH SWIMMING MOVEMENT INSIDE ARENA
+      // 1. LIVELY FISH SWIMMING MOVEMENT INSIDE EXPANDED ARENA BOUNDS
       fishTimerRef.current--;
       if (fishTimerRef.current <= 0) {
-        // Pick new random destination inside safe margins [18%, 82%]
+        // Broad roaming arena: [8%, 92%] horizontally, [10%, 90%] vertically
         fishTargetRef.current = {
-          x: 18 + Math.random() * 64,
-          y: 20 + Math.random() * 60
+          x: 8 + Math.random() * 84,
+          y: 10 + Math.random() * 80
         };
-        fishTimerRef.current = diffParams.changeInterval + Math.floor(Math.random() * 10);
+        fishTimerRef.current = diffParams.changeInterval + Math.floor(Math.random() * 8);
       }
 
       // Smooth glide towards destination with subtle water wave
       const dx = fishTargetRef.current.x - fishPosRef.current.x;
       const dy = fishTargetRef.current.y - fishPosRef.current.y;
-      const waveX = Math.sin(Date.now() / 360) * 0.6;
-      const waveY = Math.cos(Date.now() / 420) * 0.6;
+      const waveX = Math.sin(Date.now() / 280) * 0.85;
+      const waveY = Math.cos(Date.now() / 320) * 0.85;
 
-      fishPosRef.current.x = Math.max(12, Math.min(88, fishPosRef.current.x + dx * diffParams.swimSpeed + waveX));
-      fishPosRef.current.y = Math.max(14, Math.min(86, fishPosRef.current.y + dy * diffParams.swimSpeed + waveY));
-
-      setFishPos({
-        x: Math.round(fishPosRef.current.x * 10) / 10,
-        y: Math.round(fishPosRef.current.y * 10) / 10
-      });
-
-      // 2. ACTIVE PLAYER POSITION (Exclusively Webcam Hand Tracking)
+      // 2. ACTIVE PLAYER POSITION (Exclusively Webcam Fingertip Tracking)
       const activePlayerPos: Position2D = handPosRef.current;
 
       // 3. LOCK-ON DISTANCE CHECK
@@ -312,9 +358,36 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const distance = Math.hypot(distX, distY);
       const isLocked = distance <= diffParams.targetRadius;
 
+      // 4. EVASION BEHAVIOR: Fish actively bolts away if player's finger is inside catch radius
+      let evasionX = 0;
+      let evasionY = 0;
+      if (isLocked && diffParams.evasion > 0) {
+        const safeDist = distance || 1;
+        // Repulsion vector pushing fish away from player's finger
+        evasionX = - (distX / safeDist) * diffParams.evasion * 16;
+        evasionY = - (distY / safeDist) * diffParams.evasion * 16;
+
+        // High rarity agile feints (sudden dart bursts across the arena)
+        if (diffParams.evasion >= 0.12 && Math.random() < 0.04) {
+          fishTargetRef.current = {
+            x: 10 + Math.random() * 80,
+            y: 12 + Math.random() * 76
+          };
+        }
+      }
+
+      // Apply dynamic velocity with arena boundary protection
+      fishPosRef.current.x = Math.max(6, Math.min(94, fishPosRef.current.x + dx * diffParams.swimSpeed + waveX + evasionX));
+      fishPosRef.current.y = Math.max(8, Math.min(92, fishPosRef.current.y + dy * diffParams.swimSpeed + waveY + evasionY));
+
+      setFishPos({
+        x: Math.round(fishPosRef.current.x * 10) / 10,
+        y: Math.round(fishPosRef.current.y * 10) / 10
+      });
+
       setIsLockedOn(isLocked);
 
-      // 4. PROGRESS CALCULATION (Never drops in 1 sec, fair buffer!)
+      // 5. PROGRESS CALCULATION (Fast, punchy fill rate — 0.8s to 2.5s catch time)
       if (isLocked) {
         setScreenShake(false);
         sound.playReelClick();
@@ -334,7 +407,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       setCatchProgress(Math.round(currentProgressRef.current));
 
-      // 5. CATCH SUCCESS OR LOST TRIGGER (Guarded outside state updaters!)
+      // 6. CATCH SUCCESS OR LOST TRIGGER (Guarded outside state updaters!)
       if (currentProgressRef.current >= 100) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
@@ -361,10 +434,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         e.preventDefault();
         handleStrike();
       } else if (stage === 'REELING') {
-        // Remind player that reeling is physical (hand in camera / finger on screen)
+        // Remind player that reeling is physical (pointing finger in camera)
         if (['Space', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
           e.preventDefault();
-          setControlWarning('✋ КЛАВИАТУРА ОТКЛЮЧЕНА! НАВЕДИТЕ РУКУ НА РЫБУ В КАМЕРЕ!');
+          setControlWarning('☝️ КЛАВИАТУРА ОТКЛЮЧЕНА! НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В КАМЕРЕ!');
           setTimeout(() => setControlWarning(null), 2500);
         }
       }
@@ -382,7 +455,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }
     if (stage === 'REELING') {
       // Screen tapped or clicked: remind player that controls are 100% via camera gestures
-      setControlWarning('✋ УПРАВЛЕНИЕ ТОЛЬКО ЧЕРЕЗ КАМЕРУ! НАВЕДИТЕ ЛАДОНЬ НА РЫБУ В ОБЪЕКТИВЕ!');
+      setControlWarning('☝️ УПРАВЛЕНИЕ ТОЛЬКО ЧЕРЕЗ КАМЕРУ! НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В ОБЪЕКТИВЕ!');
       setTimeout(() => setControlWarning(null), 2500);
     }
   };
@@ -391,6 +464,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const triggerCatchSuccess = () => {
     if (hasAwardedRef.current) return;
     hasAwardedRef.current = true;
+
+    if (biteTimeoutRef.current) {
+      clearTimeout(biteTimeoutRef.current);
+      biteTimeoutRef.current = null;
+    }
 
     const isArcane = targetFish.rarity === 'ARCANE';
     sound.playCatch(isArcane);
@@ -440,6 +518,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   };
 
   const triggerLost = () => {
+    if (biteTimeoutRef.current) {
+      clearTimeout(biteTimeoutRef.current);
+      biteTimeoutRef.current = null;
+    }
     setStage('LOST');
     setTimeout(() => {
       setStage('IDLE');
@@ -573,7 +655,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             
             <p className="font-mono text-xs text-zinc-300 leading-relaxed">
               {cameraStatus === 'ACTIVE' ? (
-                <>Сделайте <strong className="text-emerald-400">взмах ладонью вверх</strong> перед камерой или нажмите кнопку ниже, чтобы забросить снасть.</>
+                <>Сделайте <strong className="text-emerald-400">взмах рукой вверх</strong> перед камерой или нажмите кнопку ниже, чтобы забросить снасть.</>
               ) : (
                 <>Нажмите кнопку ниже, чтобы забросить снасть в глубоководный океан.</>
               )}
@@ -587,7 +669,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </button>
             
             <div className="text-[9px] font-arcade text-cyan-300">
-              ✋ УПРАВЛЕНИЕ ДВИЖЕНИЕМ РУКИ ПЕРЕД ВЕБ-КАМЕРОЙ
+              ☝️ УПРАВЛЕНИЕ ОПТИЧЕСКИМ ПРИЦЕЛОМ ПАЛЬЦА ПЕРЕД ВЕБ-КАМЕРОЙ
             </div>
           </div>
         )}
@@ -632,7 +714,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* REELING Minigame: Direct "Hand in Camera" / "Finger on Fish" Arena! */}
+        {/* REELING Minigame: Direct "Finger on Fish" Arena! */}
         {stage === 'REELING' && (
           <div className="pointer-events-auto flex flex-col items-center gap-3 w-full max-w-2xl px-2 sm:px-4">
             
@@ -651,7 +733,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="text-right">
                   <div className="font-arcade text-[9px] text-zinc-400">СЛОЖНОСТЬ ВЫВАЖИВАНИЯ:</div>
                   <div className="font-arcade text-xs text-amber-400">
-                    ТИР: {targetFish.rarity} // ШАНС: {targetFish.catchChance}%
+                    ТИР: {targetFish.rarity} // РАДИУС: {diffParams.targetRadius}%
                   </div>
                 </div>
               </div>
@@ -679,9 +761,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   : 'bg-amber-950/80 text-amber-300 border-amber-500 animate-pulse'
               }`}>
                 {isLockedOn ? (
-                  <span>🎯 ЗАХВАТ! ДЕРЖИТЕ РУКУ НА РЫБЕ В КАДРЕ КАМЕРЫ (+100%)</span>
+                  <span>🎯 ТОЧНЫЙ ЗАХВАТ! УДЕРЖИВАЙТЕ ПАЛЕЦ НА РЫБЕ! (+100%)</span>
                 ) : (
-                  <span>✋ ПОМЕСТИТЕ РУКУ В КАМЕРУ И НАВЕДИТЕ ЕЁ НА РЫБУ!</span>
+                  <span>☝️ НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В КАМЕРЕ!</span>
                 )}
               </div>
 
@@ -750,11 +832,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   <div className={`absolute -bottom-5 px-1.5 py-0.2 bg-black/90 border font-arcade text-[7px] truncate ${
                     isLockedOn ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'
                   }`}>
-                    {isLockedOn ? 'ЗАХВАТ 100%' : 'ДЕРЖИ РУКУ ЗДЕСЬ'}
+                    {isLockedOn ? 'ЗАХВАТ 100%' : 'ЦЕЛЬ ДЛЯ ПАЛЬЦА'}
                   </div>
                 </div>
 
-                {/* 3. PLAYER'S HAND RETICLE (Webcam optical tracker) */}
+                {/* 3. PLAYER'S FINGERTIP RETICLE (Webcam optical tracker) */}
                 {cameraStatus === 'ACTIVE' && (
                   <div 
                     className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 flex flex-col items-center justify-center z-20"
@@ -763,11 +845,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                       top: `${handPos.y}%`
                     }}
                   >
-                    <div className="w-10 h-10 rounded-full border-2 border-cyan-400 bg-cyan-400/20 shadow-[0_0_15px_#22d3ee] flex items-center justify-center">
-                      <Hand className="w-5 h-5 text-cyan-300 animate-pulse" />
+                    <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center transition-all ${
+                      isLockedOn 
+                        ? 'border-emerald-300 bg-emerald-400/30 shadow-[0_0_20px_#10b981]' 
+                        : 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_15px_#22d3ee]'
+                    }`}>
+                      <span className="text-lg filter drop-shadow-[0_0_6px_rgba(34,211,238,0.8)]">☝️</span>
                     </div>
-                    <div className="px-1.5 py-0.5 bg-black/90 border border-cyan-400 font-arcade text-[7px] text-cyan-300 mt-1">
-                      ЛАДОНЬ В КАМЕРЕ
+                    <div className={`px-1.5 py-0.5 bg-black/90 border font-arcade text-[7px] mt-1 ${
+                      isLockedOn ? 'border-emerald-400 text-emerald-300' : 'border-cyan-400 text-cyan-300'
+                    }`}>
+                      {isLockedOn ? '☝️ ПАЛЕЦ НА РЫБЕ' : '☝️ ПРИЦЕЛ ПАЛЬЦА'}
                     </div>
                   </div>
                 )}
@@ -777,7 +865,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {/* Arena Footer Info */}
               <div className="flex justify-between items-center text-[8px] sm:text-[9px] font-mono text-zinc-400 pt-1">
                 <div>
-                  <span>💡 <strong className="text-white">Совет:</strong> держите ладонь в поле зрения камеры и перемещайте прямо за кругом рыбы.</span>
+                  <span>💡 <strong className="text-white">Совет:</strong> направьте указательный палец в камеру и ведите его за рыбой.</span>
                 </div>
                 <div className={`px-2 py-0.5 font-arcade ${
                   isLockedOn ? 'text-emerald-400' : 'text-amber-400'
@@ -902,9 +990,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <Camera className="w-3.5 h-3.5 text-emerald-400" />
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
-          <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах ладонью вверх перед камерой или кнопка «Забросить»</div>
-          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при сигнале поклевки</div>
-          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Наводите ладонь в камере прямо на рыбу</div>
+          <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах рукой вверх перед камерой или кнопка «Забросить»</div>
+          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резкий взмах рукой вверх при сигнале поклевки (окно 3 сек)</div>
+          <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Наводите указательный палец в камере прямо на рыбу</div>
         </div>
 
         {/* Right: Persistent Live Camera Viewfinder Window */}
@@ -929,7 +1017,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 className="w-full h-full object-cover transform -scale-x-100"
               />
 
-              {/* Hand Tracking Reticle inside Camera Viewfinder */}
+              {/* Fingertip Tracking Reticle inside Camera Viewfinder */}
               {cameraStatus === 'ACTIVE' && (
                 <div 
                   className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 z-10"
@@ -938,8 +1026,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     top: `${handPos.y}%`
                   }}
                 >
-                  <div className="w-5 h-5 rounded-full border border-cyan-400 bg-cyan-400/20 shadow-[0_0_8px_rgba(34,211,238,0.8)] flex items-center justify-center text-[10px]">
-                    ✋
+                  <div className="w-5 h-5 rounded-full border border-cyan-400 bg-cyan-400/30 shadow-[0_0_8px_rgba(34,211,238,0.8)] flex items-center justify-center text-[10px]">
+                    ☝️
                   </div>
                 </div>
               )}
@@ -989,7 +1077,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     РУКОВОДСТВО РЫБОЛОВА RODMAX
                   </h3>
                   <p className="font-mono text-[10px] text-zinc-400 mt-0.5">
-                    Управление оптическими жестами веб-камеры / Правила глубоководного вываживания
+                    Оптический трекинг указательного пальца / Механика вываживания и уклонения
                   </p>
                 </div>
               </div>
@@ -1012,7 +1100,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА (60 FPS)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    RODMAX полностью управляется оптическим трекингом веб-камеры. Разрешите доступ к камере в браузере, чтобы управлять забросом, подсечкой и вываживанием движениями ладони.
+                    RODMAX управляется оптическим трекингом веб-камеры. Разрешите доступ к камере в браузере, чтобы наводить палец на рыбу. Мышь и клавиатура для вываживания отключены.
                   </p>
                 </div>
               </div>
@@ -1024,7 +1112,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-white">ЗАБРОС СНАСТИ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Сделайте плавный взмах ладонью вверх перед камерой или нажмите экранную кнопку «Забросить удочку». Снасть уйдет на океанскую глубину.
+                    Сделайте взмах рукой вверх перед камерой или нажмите кнопку «Забросить удочку». Снасть опустится в океан на случайную глубину.
                   </p>
                 </div>
               </div>
@@ -1036,7 +1124,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-amber-300">ПОДСЕЧКА (! КЛЮЕТ !)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Когда раздастся звуковой сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или нажмите экранную кнопку «Подсечь рыбу».
+                    При сигнале «! КЛЮЕТ !» у вас есть ровно 3 секунды, чтобы резко взмахнуть рукой вверх перед камерой или нажать кнопку подсечки. Если опоздать — рыба сорвет наживку.
                   </p>
                 </div>
               </div>
@@ -1046,9 +1134,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   4
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ: «РУКА НА РЫБЕ»</h4>
+                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ: «ПАЛЕЦ НА РЫБЕ»</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    В окне арены плавает рыба в круге цели. Поместите ладонь в кадр камеры и держите маркер ладони прямо на рыбе. Шкала вываживания быстро вырастет до 100%!
+                    Направьте указательный палец в объектив камеры и удерживайте прицел <strong className="text-cyan-300">☝️</strong> прямо внутри круга рыбы. При удержании шкала быстро растет до 100% за 1–2 секунды!
                   </p>
                 </div>
               </div>
@@ -1058,9 +1146,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   5
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-emerald-400">СЛОЖНОСТЬ И ТРОФЕИ</h4>
+                  <h4 className="font-arcade text-xs text-emerald-400">ЗОНЫ РЕДКОСТИ И УКЛОНЕНИЕ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Чем круче и реже рыба — тем меньше круг захвата и тем быстрее она маневрирует. Поймайте редчайшую Неоновую Медузу (0.2%) или Небесного Кита!
+                    Чем круче рыба, тем меньше радиус захвата (Common — 36%, Arcane — 10%) и тем активнее она уклоняется от вашего пальца! Легендарные виды делают резкие рывки по всей арене.
                   </p>
                 </div>
               </div>
