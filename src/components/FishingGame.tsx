@@ -55,6 +55,18 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
   const [lostReason, setLostReason] = useState<string | null>(null);
 
+  // Thumbs Up (👍) Gesture State
+  const [isThumbsUp, setIsThumbsUp] = useState(false);
+  const thumbsUpCounterRef = useRef(0);
+  const lastCastTimeRef = useRef(0);
+
+  // False Start / Early Twitch Penalty State (Fault Mode)
+  const [isFoul, setIsFoul] = useState(false);
+  const [foulTimeLeft, setFoulTimeLeft] = useState(2.0);
+  const foulIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFoulTimeRef = useRef(0);
+
   // 0.5s Fast Bite/Strike Window State
   const [biteTimeLeft, setBiteTimeLeft] = useState(0.5);
   const biteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -284,16 +296,95 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             y: Math.round(handPosRef.current.y)
           });
 
-          // Camera Gesture 1: Cast on sudden hand swing
-          if (stage === 'IDLE' && avgMotion > 28) {
+          // Geometric Thumbs Up (👍) analysis:
+          let handMinX = 64, handMaxX = 0, handMinY = 48, handMaxY = 0;
+          let skinCount = 0;
+
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            const isSkin = r > 50 && g > 28 && b > 18 && r > g && (r - b) > 10 && (r - g) > 5;
+            if (isSkin) {
+              const px = (i / 4) % 64;
+              const py = Math.floor((i / 4) / 64);
+              if (px < handMinX) handMinX = px;
+              if (px > handMaxX) handMaxX = px;
+              if (py < handMinY) handMinY = py;
+              if (py > handMaxY) handMaxY = py;
+              skinCount++;
+            }
+          }
+
+          let isThumbsUpFrame = false;
+          if (skinCount >= 22 && (handMaxY - handMinY) >= 10 && (handMaxX - handMinX) >= 7) {
+            const handH = handMaxY - handMinY + 1;
+            const handW = handMaxX - handMinX + 1;
+            const thumbCutoffY = handMinY + Math.floor(handH * 0.38);
+
+            let thumbPixels = 0;
+            let thumbMinX = 64, thumbMaxX = 0;
+            let fistPixels = 0;
+            let fistMinX = 64, fistMaxX = 0;
+
+            for (let y = handMinY; y <= handMaxY; y++) {
+              for (let x = handMinX; x <= handMaxX; x++) {
+                const idx = (y * 64 + x) * 4;
+                const r = data[idx], g = data[idx+1], b = data[idx+2];
+                const isSkin = r > 50 && g > 28 && b > 18 && r > g && (r - b) > 10 && (r - g) > 5;
+                if (isSkin) {
+                  if (y <= thumbCutoffY) {
+                    thumbPixels++;
+                    if (x < thumbMinX) thumbMinX = x;
+                    if (x > thumbMaxX) thumbMaxX = x;
+                  } else {
+                    fistPixels++;
+                    if (x < fistMinX) fistMinX = x;
+                    if (x > fistMaxX) fistMaxX = x;
+                  }
+                }
+              }
+            }
+
+            const thumbWidth = thumbMaxX >= thumbMinX ? (thumbMaxX - thumbMinX + 1) : 0;
+            const fistWidth = fistMaxX >= fistMinX ? (fistMaxX - fistMinX + 1) : 0;
+
+            // Thumbs Up: narrow protruding thumb on top (thumbWidth <= fistWidth * 0.72)
+            // dense fist base (fistPixels >= thumbPixels * 1.25)
+            // vertical aspect ratio: handH >= handW * 0.72
+            if (
+              thumbPixels >= 5 &&
+              fistPixels >= 15 &&
+              fistPixels >= thumbPixels * 1.25 &&
+              thumbWidth > 0 &&
+              thumbWidth <= fistWidth * 0.72 &&
+              handH >= handW * 0.72
+            ) {
+              isThumbsUpFrame = true;
+            }
+          }
+
+          if (isThumbsUpFrame) {
+            thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 1);
+          } else {
+            thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
+          }
+
+          const isThumbsUpActive = thumbsUpCounterRef.current >= 3;
+          setIsThumbsUp(isThumbsUpActive);
+
+          // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
+          if (isThumbsUpActive && (stage === 'IDLE' || stage === 'CATCH_SUCCESS')) {
             handleCast();
           } 
-          // Camera Gesture 2: Strike on quick jolt
-          else if (stage === 'BITE' && avgMotion > 22) {
+          // 2. FAULT TRIGGER: Early twitch in WAITING stage scares fish
+          else if (stage === 'WAITING' && avgMotion > 16) {
+            triggerEarlyFoul();
+          }
+          // 3. STRIKE: Quick jolt/thrust in BITE stage
+          else if (stage === 'BITE' && avgMotion > 20) {
             handleStrike();
           }
-          // Camera Gesture 3: Accept catch on motion
-          else if (stage === 'LANDING' && avgMotion > 18) {
+          // 4. LANDING: Quick gesture in LANDING stage
+          else if (stage === 'LANDING' && avgMotion > 16) {
             handleAcceptCatch();
           }
         }
@@ -307,7 +398,42 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Cast Handler
   const handleCast = () => {
-    if (stage !== 'IDLE') return;
+    if (stage !== 'IDLE' && stage !== 'CATCH_SUCCESS' && stage !== 'LOST') return;
+
+    const now = Date.now();
+    if (now - lastCastTimeRef.current < 1000) return;
+    lastCastTimeRef.current = now;
+
+    // Reset round guards completely
+    isRoundFinishedRef.current = false;
+    hasAwardedRef.current = false;
+    setLostReason(null);
+    setControlWarning(null);
+    setIsFoul(false);
+    setFoulTimeLeft(2.0);
+
+    // Clear any timers
+    if (biteIntervalRef.current) {
+      clearInterval(biteIntervalRef.current);
+      biteIntervalRef.current = null;
+    }
+    if (biteTimeoutRef.current) {
+      clearTimeout(biteTimeoutRef.current);
+      biteTimeoutRef.current = null;
+    }
+    if (landingIntervalRef.current) {
+      clearInterval(landingIntervalRef.current);
+      landingIntervalRef.current = null;
+    }
+    if (foulIntervalRef.current) {
+      clearInterval(foulIntervalRef.current);
+      foulIntervalRef.current = null;
+    }
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+
     sound.playCast();
     setStage('CASTING');
     setDepth(30 + Math.floor(Math.random() * 220));
@@ -315,40 +441,93 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setTimeout(() => {
       sound.playSplash();
       setStage('WAITING');
-      
-      const biteDelay = 2000 + Math.random() * 2500;
-      setTimeout(() => {
-        sound.playBite();
-        if (typeof navigator !== 'undefined' && navigator.vibrate) {
-          navigator.vibrate([120, 60, 120]);
-        }
-        const rolled = rollFish();
-        setTargetFish(rolled);
-        setStage('BITE');
-
-        // Strict 0.5s fast strike window: player must sharply move/thrust finger in camera or fish escapes!
-        setBiteTimeLeft(0.5);
-        if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
-        const biteStart = Date.now();
-        const biteDuration = 500; // 0.5s strictly!
-
-        biteIntervalRef.current = setInterval(() => {
-          const remaining = Math.max(0, (biteDuration - (Date.now() - biteStart)) / 1000);
-          setBiteTimeLeft(Math.round(remaining * 100) / 100);
-
-          if (remaining <= 0) {
-            if (biteIntervalRef.current) {
-              clearInterval(biteIntervalRef.current);
-              biteIntervalRef.current = null;
-            }
-            if (!isRoundFinishedRef.current) {
-              sound.playSnap();
-              triggerLost('ВЫ НЕ УСПЕЛИ РЕЗКО ПОДВИНУТЬ ПАЛЕЦ В КАМЕРУ ЗА 0.5 СЕК! Рыба сорвалась с крючка!');
-            }
-          }
-        }, 20);
-      }, biteDelay);
+      const biteDelay = 2200 + Math.random() * 2500;
+      scheduleBite(biteDelay);
     }, 900);
+  };
+
+  const scheduleBite = (delayMs: number) => {
+    if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+    waitingTimerRef.current = setTimeout(() => {
+      triggerBiteSequence();
+    }, delayMs);
+  };
+
+  const triggerBiteSequence = () => {
+    if (stage !== 'WAITING' || isRoundFinishedRef.current) return;
+
+    if (foulIntervalRef.current) {
+      clearInterval(foulIntervalRef.current);
+      foulIntervalRef.current = null;
+    }
+    setIsFoul(false);
+
+    sound.playBite();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([120, 60, 120]);
+    }
+    const rolled = rollFish();
+    setTargetFish(rolled);
+    setStage('BITE');
+
+    // Strict 0.5s fast strike window:
+    setBiteTimeLeft(0.5);
+    if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
+    const biteStart = Date.now();
+    const biteDuration = 500; // 0.5s strictly!
+
+    biteIntervalRef.current = setInterval(() => {
+      const remaining = Math.max(0, (biteDuration - (Date.now() - biteStart)) / 1000);
+      setBiteTimeLeft(Math.round(remaining * 100) / 100);
+
+      if (remaining <= 0) {
+        if (biteIntervalRef.current) {
+          clearInterval(biteIntervalRef.current);
+          biteIntervalRef.current = null;
+        }
+        isRoundFinishedRef.current = true;
+        sound.playSnap();
+        triggerLost('ВЫ НЕ УСПЕЛИ РЕЗКО ПОДВИНУТЬ ПАЛЕЦ В КАМЕРУ ЗА 0.5 СЕК! Рыба сорвалась с крючка!');
+      }
+    }, 20);
+  };
+
+  // Fault Mode: Early twitch / false movement penalty during WAITING stage
+  const triggerEarlyFoul = () => {
+    if (stage !== 'WAITING') return;
+
+    const now = Date.now();
+    if (now - lastFoulTimeRef.current > 400) {
+      sound.playSnap();
+      lastFoulTimeRef.current = now;
+    }
+
+    setIsFoul(true);
+    setFoulTimeLeft(2.0);
+
+    // Push back bite by adding 2.0s penalty
+    if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+    const penaltyDelay = 2000 + Math.random() * 1200;
+    waitingTimerRef.current = setTimeout(() => {
+      triggerBiteSequence();
+    }, penaltyDelay);
+
+    // Reset or start 2.0s countdown
+    if (foulIntervalRef.current) clearInterval(foulIntervalRef.current);
+    const foulStart = Date.now();
+    foulIntervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - foulStart;
+      const left = Math.max(0, (2000 - elapsed) / 1000);
+      setFoulTimeLeft(Math.round(left * 10) / 10);
+
+      if (left <= 0) {
+        if (foulIntervalRef.current) {
+          clearInterval(foulIntervalRef.current);
+          foulIntervalRef.current = null;
+        }
+        setIsFoul(false);
+      }
+    }, 100);
   };
 
   // Strike Handler
@@ -556,9 +735,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // NO KEYBOARD REELING: Block keyboard during reeling and show prompt
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (stage === 'IDLE' && e.code === 'Space') {
+      if ((stage === 'IDLE' || stage === 'CATCH_SUCCESS') && e.code === 'Space') {
         e.preventDefault();
         handleCast();
+      } else if (stage === 'WAITING' && e.code === 'Space') {
+        e.preventDefault();
+        triggerEarlyFoul();
       } else if (stage === 'BITE' && e.code === 'Space') {
         e.preventDefault();
         handleStrike();
@@ -581,6 +763,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Pointer Handlers: ONLY allow touch/pen for screen drag
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (stage === 'WAITING') {
+      triggerEarlyFoul();
+      return;
+    }
     if (stage === 'BITE') {
       handleStrike();
       return;
@@ -663,6 +849,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   };
 
   const triggerLost = (reason?: string) => {
+    isRoundFinishedRef.current = true;
     if (biteIntervalRef.current) {
       clearInterval(biteIntervalRef.current);
       biteIntervalRef.current = null;
@@ -675,6 +862,15 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearInterval(landingIntervalRef.current);
       landingIntervalRef.current = null;
     }
+    if (foulIntervalRef.current) {
+      clearInterval(foulIntervalRef.current);
+      foulIntervalRef.current = null;
+    }
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+    setIsFoul(false);
     setLostReason(reason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!');
     setStage('LOST');
     setTimeout(() => {
@@ -802,18 +998,25 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
         {/* IDLE Prompt */}
         {stage === 'IDLE' && (
-          <div className="pointer-events-auto p-5 sm:p-6 bg-[#06120b]/95 border-2 border-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.35)] text-center max-w-md w-full space-y-4 pixel-corners animate-pulse">
+          <div className="pointer-events-auto p-5 sm:p-6 bg-[#06120b]/95 border-2 border-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.35)] text-center max-w-md w-full space-y-4 pixel-corners">
             <div className="font-arcade text-emerald-400 text-xs sm:text-sm tracking-wider">
               ГОТОВНОСТЬ К ЗАБРОСУ
             </div>
-            
-            <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-              {cameraStatus === 'ACTIVE' ? (
-                <>Сделайте <strong className="text-emerald-400">взмах рукой вверх</strong> перед камерой или нажмите кнопку ниже, чтобы забросить снасть.</>
-              ) : (
-                <>Нажмите кнопку ниже, чтобы забросить снасть в глубоководный океан.</>
-              )}
-            </p>
+
+            {/* Gesture Thumbs Up Prompt */}
+            <div className={`p-3 border transition-all ${
+              isThumbsUp 
+                ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_20px_#10b981]' 
+                : 'bg-black/60 border-zinc-700 text-zinc-300'
+            }`}>
+              <div className="font-arcade text-xs flex items-center justify-center gap-2">
+                <span className="text-xl">👍</span>
+                <span>{isThumbsUp ? 'ЖЕСТ «ЛАЙК» РАСПОЗНАН! ЗАБРОС...' : 'ПОКАЖИТЕ «ЛАЙК» В КАМЕРУ'}</span>
+              </div>
+              <div className="font-mono text-[9px] text-zinc-400 mt-1">
+                Для заброса нужен именно жест 👍 (другие жесты заблокированы)
+              </div>
+            </div>
 
             <button
               onClick={handleCast}
@@ -835,16 +1038,34 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* WAITING for Bite */}
+        {/* WAITING for Bite with Early Twitch / Foul Mode */}
         {stage === 'WAITING' && (
-          <div className="flex flex-col items-center gap-3 p-5 bg-[#05110a]/90 border border-emerald-500/60 pixel-corners animate-pulse">
-            <div className="flex items-center gap-2 text-cyan-400 font-arcade text-xs tracking-wider">
-              <Activity className="w-4 h-4 animate-spin" />
-              <span>ОЖИДАНИЕ ПОКЛЕВКИ...</span>
-            </div>
-            <div className="font-mono text-[10px] sm:text-[11px] text-zinc-400 text-center">
-              Приготовьтесь к резкому взмаху рукой или нажатию кнопки при поклевке!
-            </div>
+          <div className="flex flex-col items-center gap-3 max-w-md w-full">
+            {isFoul ? (
+              <div className="p-4 sm:p-5 bg-red-950/95 border-2 border-red-500 pixel-corners text-center space-y-2 animate-shake shadow-[0_0_35px_rgba(239,68,68,0.7)] w-full">
+                <div className="font-arcade text-xs sm:text-sm text-red-300 flex items-center justify-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />
+                  <span>⚠️ ОШИБКА: ФАЛЬСТАРТ!</span>
+                </div>
+                <div className="font-arcade text-[10px] text-amber-300">
+                  ВЫ ДЕРНУЛИ ПАЛЬЦЕМ РАНЬШЕ ПОКЛЕВКИ!
+                </div>
+                <div className="font-mono text-[9px] text-zinc-300">
+                  Рыба испугалась! Штрафная пауза: <span className="text-red-400 font-bold">{foulTimeLeft.toFixed(1)}с</span>.
+                  <br />Не спамьте, держите руку неподвижно!
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 p-5 bg-[#05110a]/90 border border-emerald-500/60 pixel-corners animate-pulse w-full text-center">
+                <div className="flex items-center justify-center gap-2 text-cyan-400 font-arcade text-xs tracking-wider">
+                  <Activity className="w-4 h-4 animate-spin" />
+                  <span>ОЖИДАНИЕ ПОКЛЕВКИ...</span>
+                </div>
+                <div className="font-mono text-[10px] text-zinc-400">
+                  Держите руку неподвижно! При поклевке резко подвиньте палец в камеру.
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1191,12 +1412,27 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               </div>
             )}
 
-            <div className="pt-2 flex flex-col sm:flex-row gap-2">
+            {/* Thumbs Up Gesture Banner for Mouse-Free Recast */}
+            <div className={`p-2.5 border transition-all ${
+              isThumbsUp 
+                ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_20px_#10b981]' 
+                : 'bg-black/80 border-emerald-500/40 text-emerald-300'
+            }`}>
+              <div className="font-arcade text-[10px] flex items-center justify-center gap-1.5">
+                <span className="text-base">👍</span>
+                <span>{isThumbsUp ? 'ЖЕСТ «ЛАЙК» РАСПОЗНАН! ЗАБРОС...' : 'ПОКАЖИТЕ «ЛАЙК» В КАМЕРУ ДЛЯ ЗАБРОСА'}</span>
+              </div>
+              <div className="font-mono text-[8px] text-zinc-400 mt-0.5">
+                Можно не трогать мышь — просто покажите большой палец вверх в объектив!
+              </div>
+            </div>
+
+            <div className="pt-1 flex flex-col sm:flex-row gap-2">
               <button
-                onClick={() => setStage('IDLE')}
+                onClick={handleCast}
                 className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs border border-emerald-300 shadow-[0_3px_0_#064e3b]"
               >
-                ЕЩЕ ЗАБРОС
+                [ ЕЩЕ ЗАБРОС ]
               </button>
               
               {!profile.isRegistered && setTab && (
@@ -1231,8 +1467,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <Camera className="w-3.5 h-3.5 text-emerald-400" />
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
-          <div><span className="text-cyan-400">[ЗАБРОС]</span> Взмах рукой вверх перед камерой или кнопка «Забросить»</div>
-          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру при поклевке (окно 0.5 сек)</div>
+          <div><span className="text-cyan-400">[ЗАБРОС]</span> Жест «Лайк» (👍) в камеру (другие жесты заблокированы)</div>
+          <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру (окно 0.5 сек)</div>
+          <div><span className="text-red-400">[ОШИБКА]</span> Рывок раньше поклевки = фальстарт (штраф 2 сек)</div>
           <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
           <div><span className="text-rose-400">[ПРИЕМ]</span> Быстро подтвердите улов (окно ровно 1.0 сек, иначе срыв!)</div>
         </div>
@@ -1245,8 +1482,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className={`w-1.5 h-1.5 rounded-full ${cameraStatus === 'ACTIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                 <span>ВЕБ-КАМЕРА</span>
               </div>
-              <div className={cameraStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}>
-                {cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
+              <div className={isThumbsUp ? 'text-emerald-400 font-bold animate-pulse' : cameraStatus === 'ACTIVE' ? 'text-zinc-300' : 'text-amber-400'}>
+                {isThumbsUp ? '👍 ЛАЙК' : cameraStatus === 'ACTIVE' ? '60 FPS' : cameraStatus === 'CONNECTING' ? 'ЗАПУСК...' : 'ОТКЛ'}
               </div>
             </div>
 
