@@ -57,7 +57,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
             
             {/* Live Season Badge */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#061e14] border border-emerald-500/80 font-arcade text-[10px] text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-              <span>СЕЗОН 1: ШТОРМ БЕЗДНЫ // WEBCAM MOTION 60 FPS</span>
+              <span>СЕЗОН 1: ШТОРМ БЕЗДНЫ // 60 FPS</span>
             </div>
 
             {/* Title & Slogans */}
@@ -194,7 +194,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
           <div className="space-y-3 max-w-xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-400/20 border border-emerald-400 font-arcade text-[10px] text-emerald-300">
               <Crown className="w-3.5 h-3.5 text-amber-400" />
-              <span>ВЕРХОВНЫЙ ТИР РЕДКОСТИ: ARCANE (0.2%)</span>
+              <span>ARCANE (0.2%)</span>
             </div>
             <h2 className="font-arcade text-xl sm:text-2xl text-white tracking-wider">
               {arcaneFish.name}
@@ -262,7 +262,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
               </div>
               <h3 className="font-arcade text-xs text-white">РЕЗКИЙ РЫВОК ДЛЯ ПОДСЕЧКИ</h3>
               <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                При звуковом сигнале эхолота и всплывающей надписи «! КЛЮЕТ !» сделай резкий взмах рукой вверх, чтобы моментально зацепить рыбу.
+                При звуковом сигнале поклевки и всплывающей надписи «! КЛЮЕТ !» сделай резкий взмах рукой вверх, чтобы моментально зацепить рыбу.
               </p>
               <div className="px-2 py-1 bg-black/60 border border-cyan-500/30 font-arcade text-[9px] text-cyan-400 inline-block">
                 ТАЙМИНГ: РЕЗКИЙ РЫВОК ПРИ ПОКЛЕВКЕ
@@ -419,7 +419,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ setTab, openBestiary, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-amber-300">ПОДСЕЧКА (! КЛЮЕТ !)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Когда эхолот запищит и появится сигнал «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или быстро нажмите <strong className="text-amber-400">[ПРОБЕЛ]</strong>, чтобы подсечь рыбу.
+                    Когда раздастся резкий сигнал и появится «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или быстро нажмите <strong className="text-amber-400">[ПРОБЕЛ]</strong>, чтобы подсечь рыбу.
                   </p>
                 </div>
               </div>

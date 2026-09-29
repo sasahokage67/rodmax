@@ -6,17 +6,15 @@ import confetti from 'canvas-confetti';
 import { 
   Sparkles, 
   UserPlus, 
-  Radio, 
   Camera, 
   CameraOff, 
   HelpCircle, 
   X, 
-  Check, 
-  Hand,
   Activity, 
-  MousePointer, 
-  Layers, 
-  Trophy 
+  Smartphone, 
+  Monitor, 
+  Hand,
+  Volume2
 } from 'lucide-react';
 
 interface FishingGameProps {
@@ -33,6 +31,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
 
+  // Layout Orientation: 'horizontal' for PC/desktop, 'vertical' for mobile/phone
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768 || window.innerHeight > window.innerWidth;
+  });
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'horizontal' | 'vertical'>('auto');
+  const activeLayout = layoutMode === 'auto' ? (isMobile ? 'vertical' : 'horizontal') : layoutMode;
+
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
@@ -42,26 +48,64 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [handMotionY, setHandMotionY] = useState(50); // 0 to 100
   const [motionIntensity, setMotionIntensity] = useState(0);
 
-  // Minigame variables (Stardew / FISCH gravity physics)
+  // Minigame variables
   const [fishPos, setFishPos] = useState(50); // 0 to 100
   const [barPos, setBarPos] = useState(50);   // 0 to 100
-  const [catchProgress, setCatchProgress] = useState(35); // 0 to 100
+  const [catchProgress, setCatchProgress] = useState(25); // 0 to 100 (hardcore starting progress)
   const [tensionStatus, setTensionStatus] = useState<'БЕЗОПАСНО' | 'ОПАСНО'>('БЕЗОПАСНО');
   const [isPulling, setIsPulling] = useState(false);
+  const [screenShake, setScreenShake] = useState(false);
+
+  // Touch / Finger Direct Control State
+  const [fingerPos, setFingerPos] = useState<number | null>(null);
+  const [touchActive, setTouchActive] = useState(false);
 
   // Physics refs
   const barVelocity = useRef(0);
   const barPosRef = useRef(50);
   const fishPosRef = useRef(50);
+  const fishTargetRef = useRef(50);
+  const fishVelocityRef = useRef(0);
+  const fishDecisionTimer = useRef(0);
   const isPullingRef = useRef(false);
+  const touchPosRef = useRef<number | null>(null);
 
   // Camera & Canvas refs
   const webcamVideoRef = useRef<HTMLVideoElement>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
   const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   // Simulated depth
   const [depth, setDepth] = useState(45);
+
+  // Safe bar size based on difficulty
+  const getSafeBarSize = (difficulty: number) => {
+    switch (difficulty) {
+      case 1: return 22; // Common Boot
+      case 2: return 18; // Salmon, Goldfish
+      case 3: return 14; // Anglerfish
+      case 4: return 11; // Megalodon
+      case 5: return 8.5; // Leviathan, Celestial Whale, Arcane Jellyfish
+      default: return 14;
+    }
+  };
+
+  const safeBarSize = getSafeBarSize(targetFish.catchDifficulty);
+
+  // Detect orientation / resize
+  useEffect(() => {
+    const handleResize = () => {
+      const mobileNow = window.innerWidth < 768 || window.innerHeight > window.innerWidth;
+      setIsMobile(mobileNow);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
 
   // 1. Initialize Webcam Stream
   useEffect(() => {
@@ -140,21 +184,19 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         setMotionIntensity(avgMotion);
 
         if (motionPoints > 15) {
-          // Invert so high hand = 0% (top)
           const centroidY = (weightedY / motionPoints) / 48 * 100;
           setHandMotionY(Math.round(centroidY));
 
-          // Camera Gesture 1: Cast on sudden hand swing
+          // Gesture 1: Cast on sudden hand swing
           if (stage === 'IDLE' && avgMotion > 28) {
             handleCast();
           } 
-          // Camera Gesture 2: Strike on quick jolt
+          // Gesture 2: Strike on quick jolt
           else if (stage === 'BITE' && avgMotion > 22) {
             handleStrike();
           } 
-          // Camera Gesture 3: Reeling bar control by vertical hand height
-          else if (stage === 'REELING') {
-            // Hand in upper half of camera lifts bar
+          // Gesture 3: Reeling bar control by vertical hand height
+          else if (stage === 'REELING' && touchPosRef.current === null) {
             if (centroidY < 48) {
               isPullingRef.current = true;
               setIsPulling(true);
@@ -177,7 +219,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     if (stage !== 'IDLE') return;
     sound.playCast();
     setStage('CASTING');
-    setDepth(25 + Math.floor(Math.random() * 210));
+    setDepth(30 + Math.floor(Math.random() * 220));
 
     setTimeout(() => {
       sound.playSplash();
@@ -186,6 +228,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const biteDelay = 2000 + Math.random() * 2600;
       setTimeout(() => {
         sound.playBite();
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
         const rolled = rollFish();
         setTargetFish(rolled);
         setStage('BITE');
@@ -199,56 +244,95 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     sound.playReelClick();
     barPosRef.current = 50;
     fishPosRef.current = 50;
+    fishTargetRef.current = 50;
     barVelocity.current = 0;
+    fishVelocityRef.current = 0;
+    fishDecisionTimer.current = 0;
+    touchPosRef.current = null;
     setBarPos(50);
     setFishPos(50);
-    setCatchProgress(40);
+    setCatchProgress(25); // Hardcore starting progress
+    setFingerPos(null);
+    setTouchActive(false);
     setStage('REELING');
   };
 
-  // Physics Reeling Loop: gravity + thrust (from camera gesture or mouse/key)
+  // Hardcore Physics Reeling Loop
   useEffect(() => {
     if (stage !== 'REELING') return;
 
-    const gravity = 0.55;
-    const thrust = -0.95;
-    const difficultyFactor = targetFish.catchDifficulty * 1.3;
+    const gravity = 0.65;
+    const thrust = -1.15;
+    const difficultyFactor = targetFish.catchDifficulty;
 
     const loop = setInterval(() => {
-      // 1. Bar Physics
-      if (isPullingRef.current) {
-        barVelocity.current += thrust;
+      // 1. Player Bar Physics
+      // If user is controlling with finger / pointer drag directly
+      if (touchPosRef.current !== null) {
+        // Direct agile glide to finger coordinate
+        barPosRef.current += (touchPosRef.current - barPosRef.current) * 0.48;
         sound.playReelClick();
       } else {
-        barVelocity.current += gravity;
+        // Fallback to keyboard/mouse hold or webcam gesture
+        if (isPullingRef.current) {
+          barVelocity.current += thrust;
+          sound.playReelClick();
+        } else {
+          barVelocity.current += gravity;
+        }
+        barVelocity.current *= 0.86;
+        barPosRef.current += barVelocity.current;
       }
 
-      // Apply damping / drag
-      barVelocity.current *= 0.88;
-      barPosRef.current += barVelocity.current;
-
-      // Bounce off walls
-      if (barPosRef.current < 8) {
-        barPosRef.current = 8;
-        barVelocity.current = 0;
-      } else if (barPosRef.current > 92) {
-        barPosRef.current = 92;
-        barVelocity.current = 0;
-      }
+      // Clamp player bar
+      barPosRef.current = Math.max(6, Math.min(94, barPosRef.current));
       setBarPos(barPosRef.current);
 
-      // 2. Fish Movement Physics
-      const fishJitter = (Math.random() - 0.48) * (difficultyFactor * 5.5);
-      fishPosRef.current = Math.min(88, Math.max(12, fishPosRef.current + fishJitter));
+      // 2. Advanced Hardcore Fish Behavior
+      fishDecisionTimer.current--;
+      if (fishDecisionTimer.current <= 0) {
+        // Pick new erratic target
+        const lungeRange = difficultyFactor >= 4 ? 75 : 55;
+        const newTarget = 15 + Math.random() * lungeRange;
+        fishTargetRef.current = Math.max(8, Math.min(92, newTarget));
+        // Harder fish decide and switch direction much faster!
+        const nextTime = Math.max(4, 18 - difficultyFactor * 2.8 + Math.floor(Math.random() * 6));
+        fishDecisionTimer.current = nextTime;
+      }
+
+      // Acceleration towards target with difficulty scaling
+      const deltaToTarget = fishTargetRef.current - fishPosRef.current;
+      const accel = 0.08 + difficultyFactor * 0.045;
+      fishVelocityRef.current += deltaToTarget * accel;
+      fishVelocityRef.current *= 0.72; // damping
+
+      // High-frequency jitter for resisting predator feel
+      const jitter = (Math.random() - 0.5) * (difficultyFactor * 3.6);
+      fishPosRef.current = Math.max(8, Math.min(92, fishPosRef.current + fishVelocityRef.current + jitter));
       setFishPos(fishPosRef.current);
 
       // 3. Tension and Progress calculation
-      const dist = Math.abs(barPosRef.current - fishPosRef.current);
-      const inSafeZone = dist < 17; // safe threshold
+      const safeThreshold = safeBarSize / 2;
+      const distance = Math.abs(barPosRef.current - fishPosRef.current);
+      const inSafeZone = distance <= safeThreshold;
+
       setTensionStatus(inSafeZone ? 'БЕЗОПАСНО' : 'ОПАСНО');
 
+      if (!inSafeZone) {
+        setScreenShake(true);
+        if (Math.random() < 0.28) {
+          sound.playWarning();
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate(15);
+          }
+        }
+      } else {
+        setScreenShake(false);
+      }
+
       setCatchProgress((prev) => {
-        const delta = inSafeZone ? 1.7 : -1.9;
+        // Hardcore progression: +0.95% on success, -2.6% on mistake
+        const delta = inSafeZone ? 0.95 : -2.6;
         const next = prev + delta;
 
         if (next >= 100) {
@@ -258,16 +342,17 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
         if (next <= 0) {
           clearInterval(loop);
+          sound.playSnap();
           triggerLost();
           return 0;
         }
         return next;
       });
 
-    }, 50);
+    }, 45);
 
     return () => clearInterval(loop);
-  }, [stage, targetFish]);
+  }, [stage, targetFish, safeBarSize]);
 
   // Keyboard controls
   useEffect(() => {
@@ -282,7 +367,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
       }
       if (stage === 'REELING') {
-        if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'KeyD' || e.code === 'ArrowRight') {
           setIsPulling(true);
           isPullingRef.current = true;
         }
@@ -290,7 +375,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
+      if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'KeyD' || e.code === 'ArrowRight') {
         setIsPulling(false);
         isPullingRef.current = false;
       }
@@ -304,18 +389,55 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     };
   }, [stage]);
 
-  // Mouse holding handlers for tension
-  const handleMouseDown = () => {
+  // Touch and Drag Handlers for Finger Control
+  const handleTouchUpdate = (clientX: number, clientY: number) => {
+    if (!trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+
+    let percent = 50;
+    if (activeLayout === 'vertical') {
+      // In vertical: bottom is 0%, top is 100%
+      const relativeY = clientY - rect.top;
+      percent = 100 - (relativeY / rect.height) * 100;
+    } else {
+      // In horizontal: left is 0%, right is 100%
+      const relativeX = clientX - rect.left;
+      percent = (relativeX / rect.width) * 100;
+    }
+
+    const clamped = Math.max(6, Math.min(94, percent));
+    touchPosRef.current = clamped;
+    setFingerPos(clamped);
+    setTouchActive(true);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (stage === 'BITE') {
+      handleStrike();
+      return;
+    }
     if (stage === 'REELING') {
-      setIsPulling(true);
-      isPullingRef.current = true;
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      handleTouchUpdate(e.clientX, e.clientY);
     }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (stage === 'REELING' && touchActive) {
+      handleTouchUpdate(e.clientX, e.clientY);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (stage === 'REELING') {
-      setIsPulling(false);
-      isPullingRef.current = false;
+      try {
+        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch {
+        // ignore
+      }
+      touchPosRef.current = null;
+      setFingerPos(null);
+      setTouchActive(false);
     }
   };
 
@@ -328,7 +450,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     const weight = +(targetFish.weightMin + Math.random() * (targetFish.weightMax - targetFish.weightMin)).toFixed(1);
     const price = Math.round(targetFish.basePrice * (weight / targetFish.weightMin));
 
-    // EXP scaled by rarity and weight
     const baseExpMap: Record<string, number> = {
       COMMON: 30,
       UNCOMMON: 65,
@@ -370,15 +491,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setStage('LOST');
     setTimeout(() => {
       setStage('IDLE');
-    }, 2000);
+    }, 2200);
   };
 
   return (
     <div 
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      className="relative w-full h-[calc(100vh-65px)] bg-black overflow-hidden select-none flex flex-col justify-between"
+      className={`relative w-full h-[calc(100vh-65px)] bg-black overflow-hidden select-none flex flex-col justify-between ${
+        screenShake ? 'animate-shake' : ''
+      }`}
     >
       {/* Hidden Motion Detection Canvas */}
       <canvas ref={motionCanvasRef} className="hidden" />
@@ -414,57 +534,76 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       <div className="absolute inset-0 scanlines pointer-events-none z-10" />
 
       {/* 2. Top Game HUD */}
-      <div className="relative z-20 px-4 py-2.5 bg-[#06100a]/90 border-b border-emerald-500/50 backdrop-blur-md flex flex-wrap justify-between items-center gap-3 text-xs font-arcade">
+      <div className="relative z-20 px-3 sm:px-4 py-2 bg-[#06100a]/90 border-b border-emerald-500/50 backdrop-blur-md flex flex-wrap justify-between items-center gap-2 text-xs font-arcade">
         
-        {/* Left: Location & Guide Button */}
-        <div className="flex items-center gap-3">
-          <div className="text-emerald-400">
-            ИЗУМРУДНЫЙ АТОЛЛ [ЗОНА 1]
+        {/* Left: Location, Depth & Guide Button */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="text-emerald-400 text-[10px] sm:text-xs">
+            ИЗУМРУДНЫЙ АТОЛЛ
           </div>
-          <div className="hidden sm:inline text-zinc-500">|</div>
-          <div className="hidden sm:inline text-cyan-300">
-            ГЛУБИНА: {depth} М
+          <div className="text-zinc-500">|</div>
+          <div className="text-cyan-300 text-[10px] sm:text-xs">
+            {depth} М
           </div>
 
-          {/* HOW TO PLAY GUIDE BUTTON */}
+          {/* Guide Button */}
           <button
             onClick={() => { sound.playReelClick(); setIsGuideOpen(true); }}
-            className="py-1 px-2.5 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-400 font-arcade text-[9px] flex items-center gap-1.5 transition-all shadow-[0_0_10px_rgba(251,191,36,0.3)] animate-pulse"
+            className="py-1 px-2 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-400 font-arcade text-[8px] sm:text-[9px] flex items-center gap-1 transition-all shadow-[0_0_10px_rgba(251,191,36,0.3)] animate-pulse"
           >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>КАК ИГРАТЬ? (ГАЙД)</span>
+            <HelpCircle className="w-3 h-3" />
+            <span className="hidden sm:inline">КАК ИГРАТЬ?</span>
+            <span className="sm:hidden">ГАЙД</span>
           </button>
         </div>
 
-        {/* Right: Camera Toggle & Angler Info */}
-        <div className="flex items-center gap-3">
+        {/* Right: Layout Switcher, Camera Toggle & Angler Info */}
+        <div className="flex items-center gap-2 sm:gap-3">
           
+          {/* Layout Orientation Toggle (PC Horizontal vs Phone Vertical) */}
+          <button
+            onClick={() => {
+              sound.playReelClick();
+              setLayoutMode(activeLayout === 'horizontal' ? 'vertical' : 'horizontal');
+            }}
+            className="py-1 px-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-arcade text-[8px] sm:text-[9px] flex items-center gap-1 transition-colors"
+            title="Переключить горизонтальный режим (ПК) / вертикальный режим (Телефон)"
+          >
+            {activeLayout === 'horizontal' ? (
+              <>
+                <Monitor className="w-3 h-3 text-cyan-400" />
+                <span>РЕЖИМ: ПК (ГОРИЗОНТ.)</span>
+              </>
+            ) : (
+              <>
+                <Smartphone className="w-3 h-3 text-emerald-400" />
+                <span>РЕЖИМ: ТЕЛЕФОН (ВЕРТИК.)</span>
+              </>
+            )}
+          </button>
+
           {/* Camera Toggle Button */}
           <button
             onClick={() => {
               sound.playReelClick();
               setCameraEnabled(!cameraEnabled);
             }}
-            className={`py-1 px-2.5 border font-arcade text-[9px] flex items-center gap-1.5 transition-all ${
+            className={`py-1 px-2 border font-arcade text-[8px] sm:text-[9px] flex items-center gap-1 transition-all ${
               cameraEnabled && cameraStatus === 'ACTIVE'
-                ? 'bg-emerald-500 text-black border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)] font-bold'
+                ? 'bg-emerald-500 text-black border-emerald-300 font-bold'
                 : cameraEnabled && cameraStatus === 'CONNECTING'
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500 animate-pulse'
                 : 'bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-white'
             }`}
-            title="Включить или отключить управление веб-камерой"
+            title="Включить или отключить веб-камеру"
           >
             {cameraEnabled && cameraStatus === 'ACTIVE' ? (
-              <Camera className="w-3.5 h-3.5" />
+              <Camera className="w-3 h-3" />
             ) : (
-              <CameraOff className="w-3.5 h-3.5 text-zinc-500" />
+              <CameraOff className="w-3 h-3 text-zinc-500" />
             )}
-            <span>
-              {cameraEnabled && cameraStatus === 'ACTIVE' 
-                ? 'КАМЕРА: АКТИВНА' 
-                : cameraStatus === 'CONNECTING' 
-                ? 'ПОДКЛЮЧЕНИЕ...' 
-                : 'КАМЕРА: ВЫКЛ'}
+            <span className="hidden sm:inline">
+              {cameraEnabled && cameraStatus === 'ACTIVE' ? 'КАМЕРА' : 'КАМЕРА ВЫКЛ'}
             </span>
           </button>
 
@@ -485,20 +624,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       </div>
 
       {/* 3. Center Game Stage Alerts & Minigame */}
-      <div className="relative z-20 flex-1 flex items-center justify-center pointer-events-none">
+      <div className="relative z-20 flex-1 flex items-center justify-center pointer-events-none p-3">
         
         {/* IDLE Prompt */}
         {stage === 'IDLE' && (
-          <div className="pointer-events-auto p-6 bg-[#06120b]/95 border-2 border-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.35)] text-center max-w-md space-y-4 pixel-corners animate-pulse">
-            <div className="font-arcade text-emerald-400 text-sm tracking-wider">
+          <div className="pointer-events-auto p-5 sm:p-6 bg-[#06120b]/95 border-2 border-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.35)] text-center max-w-md w-full space-y-4 pixel-corners animate-pulse">
+            <div className="font-arcade text-emerald-400 text-xs sm:text-sm tracking-wider">
               ГОТОВНОСТЬ К ЗАБРОСУ
             </div>
             
             <p className="font-mono text-xs text-zinc-300 leading-relaxed">
               {cameraStatus === 'ACTIVE' ? (
-                <>Взмахни рукой вверх перед камерой или нажми кнопку ниже, чтобы забросить снасти в глубоководный океан.</>
+                <>Взмахни рукой вверх перед камерой или нажми кнопку ниже, чтобы забросить снасть в глубину.</>
               ) : (
-                <>Нажми [ПРОБЕЛ] или кнопку ниже, чтобы забросить снасти в глубоководный океан.</>
+                <>Нажми [ПРОБЕЛ] или кнопку ниже, чтобы забросить снасть в глубоководный океан.</>
               )}
             </p>
 
@@ -510,14 +649,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </button>
             
             <div className="text-[9px] font-arcade text-zinc-500">
-              {cameraStatus === 'ACTIVE' ? '✓ ТРЕКИНГ РУК АКТИВЕН' : '✓ РЕЖИМ МЫШИ И КЛАВИАТУРЫ'}
+              {activeLayout === 'vertical' ? '📱 ТЕЛЕФОН: УПРАВЛЕНИЕ ПАЛЬЦЕМ' : '💻 ПК: МЫШЬ / ПРОБЕЛ / ЖЕСТЫ'}
             </div>
           </div>
         )}
 
         {/* CASTING Animation phase */}
         {stage === 'CASTING' && (
-          <div className="p-4 bg-black/85 border-2 border-emerald-400 font-arcade text-sm text-emerald-300 animate-pulse pixel-corners shadow-[0_0_20px_rgba(16,185,129,0.4)]">
+          <div className="p-4 bg-black/85 border-2 border-emerald-400 font-arcade text-xs sm:text-sm text-emerald-300 animate-pulse pixel-corners shadow-[0_0_20px_rgba(16,185,129,0.4)]">
             ЗАБРОС ЛЕСКИ В ОКЕАН...
           </div>
         )}
@@ -529,8 +668,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <Activity className="w-4 h-4 animate-spin" />
               <span>ОЖИДАНИЕ ПОКЛЕВКИ...</span>
             </div>
-            <div className="font-mono text-[11px] text-zinc-400">
-              Держи руку наготове перед камерой для резкой подсечки!
+            <div className="font-mono text-[10px] sm:text-[11px] text-zinc-400 text-center">
+              Приготовься к мгновенной подсечке при поклевке!
             </div>
           </div>
         )}
@@ -539,66 +678,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         {stage === 'BITE' && (
           <div 
             onClick={handleStrike}
-            className="pointer-events-auto cursor-pointer p-8 bg-red-950/90 border-4 border-amber-400 text-center animate-bounce shadow-[0_0_50px_rgba(245,158,11,0.7)] pixel-corners space-y-3"
+            className="pointer-events-auto cursor-pointer p-6 sm:p-8 bg-red-950/90 border-4 border-amber-400 text-center animate-bounce shadow-[0_0_50px_rgba(245,158,11,0.7)] pixel-corners space-y-3"
           >
-            <div className="font-arcade text-2xl text-amber-300 tracking-widest drop-shadow-[0_2px_4px_black]">
+            <div className="font-arcade text-xl sm:text-2xl text-amber-300 tracking-widest drop-shadow-[0_2px_4px_black]">
               ! КЛЮЕТ !
             </div>
-            <div className="font-arcade text-xs text-white">
+            <div className="font-arcade text-[10px] sm:text-xs text-white">
               {cameraStatus === 'ACTIVE' 
                 ? 'РЕЗКО ВЗМАХНИ РУКОЙ ВВЕРХ ИЛИ НАЖМИ [ПРОБЕЛ]!' 
-                : 'ЖМИ [ПРОБЕЛ] ИЛИ КЛИКАЙ ДЛЯ ПОДСЕЧКИ!'}
+                : 'КЛИКАЙ ИЛИ ЖМИ [ПРОБЕЛ] ДЛЯ ПОДСЕЧКИ!'}
             </div>
-            <div className="inline-block py-2 px-6 bg-amber-400 text-black font-arcade text-xs font-bold border-2 border-white">
+            <div className="inline-block py-2 px-5 bg-amber-400 text-black font-arcade text-xs font-bold border-2 border-white">
               [ ПОДСЕЧЬ РЫБУ ]
             </div>
           </div>
         )}
 
-        {/* REELING Minigame HUD (FISCH / Gravity tension mechanics) */}
+        {/* REELING Minigame HUD (Dual Layout: Horizontal for PC vs Vertical for Phone) */}
         {stage === 'REELING' && (
-          <div className="pointer-events-auto flex items-center gap-8 p-6 bg-[#040e08]/95 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.35)] pixel-corners">
-            
-            {/* Vertical Tension Track */}
-            <div className="relative w-12 h-80 bg-black/90 border-2 border-emerald-500 overflow-hidden shadow-inner flex flex-col justify-end">
+          activeLayout === 'horizontal' ? (
+            /* =================== HORIZONTAL MODE (PC / DESKTOP) =================== */
+            <div className="pointer-events-auto w-full max-w-2xl p-5 bg-[#040e08]/95 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.35)] pixel-corners space-y-4">
               
-              {/* Fish Position */}
-              <div 
-                className="absolute left-1 right-1 h-7 border-2 border-amber-400 bg-amber-500/30 flex items-center justify-center transition-all duration-75 text-xs select-none"
-                style={{ bottom: `${fishPos}%` }}
-              >
-                🐟
-              </div>
-
-              {/* Player Tension Green Safe Bar */}
-              <div 
-                className={`absolute left-0.5 right-0.5 h-16 border-2 transition-all duration-75 ${
-                  tensionStatus === 'БЕЗОПАСНО' 
-                    ? 'border-emerald-300 bg-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.5)]' 
-                    : 'border-red-400 bg-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.5)]'
-                }`}
-                style={{ bottom: `${barPos}%` }}
-              />
-
-              {/* Centroid indicator if camera is active */}
-              {cameraStatus === 'ACTIVE' && (
-                <div 
-                  className="absolute right-0 w-2 h-2 rounded-full bg-cyan-400 shadow-md"
-                  style={{ bottom: `${100 - handMotionY}%` }}
-                  title="Положение руки"
-                />
-              )}
-
-            </div>
-
-            {/* Minigame Diagnostics & Catch Progress */}
-            <div className="w-56 space-y-4">
-              
-              <div>
-                <div className="font-arcade text-[10px] text-zinc-400">ЦЕЛЬ НА ЛЕСКЕ:</div>
-                <div className="font-arcade text-xs text-white truncate">{targetFish.name}</div>
-                <div className="font-arcade text-[9px] mt-0.5" style={{ color: targetFish.color }}>
-                  {targetFish.rarity} // ШАНС: {targetFish.catchChance}%
+              {/* Telemetry Header: HIDDEN TARGET (NO SPOILERS!) */}
+              <div className="flex justify-between items-center border-b border-emerald-500/30 pb-2">
+                <div>
+                  <div className="font-arcade text-[9px] text-zinc-400">ДОБЫЧА НА КРЮЧКЕ:</div>
+                  <div className="font-arcade text-xs text-emerald-300 tracking-wider animate-pulse">
+                    ??? НЕИЗВЕСТНАЯ ДОБЫЧА
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-arcade text-[9px] text-zinc-400">СОПРОТИВЛЕНИЕ:</div>
+                  <div className="font-arcade text-xs text-amber-400">
+                    {targetFish.catchDifficulty >= 4 ? 'СВЕРХМОЩНОЕ' : targetFish.catchDifficulty >= 3 ? 'ВЫСОКОЕ' : 'АКТИВНОЕ'}
+                  </div>
                 </div>
               </div>
 
@@ -606,57 +720,233 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               <div className="space-y-1">
                 <div className="flex justify-between font-arcade text-[9px]">
                   <span className="text-zinc-400">ПРОГРЕСС ВЫВАЖИВАНИЯ:</span>
-                  <span className="text-emerald-400">{Math.round(catchProgress)}%</span>
+                  <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold animate-pulse'}>
+                    {Math.round(catchProgress)}%
+                  </span>
                 </div>
-                <div className="w-full h-4 bg-black border border-emerald-500 p-0.5">
+                <div className="w-full h-3.5 bg-black border border-emerald-500 p-0.5">
                   <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-100"
+                    className="h-full bg-gradient-to-r from-emerald-500 via-cyan-400 to-amber-300 transition-all duration-75"
                     style={{ width: `${catchProgress}%` }}
                   />
                 </div>
               </div>
 
-              {/* Status Indicator */}
-              <div className={`p-2 font-arcade text-[10px] text-center border ${
-                tensionStatus === 'БЕЗОПАСНО'
-                  ? 'bg-emerald-950 text-emerald-300 border-emerald-500'
-                  : 'bg-red-950 text-red-300 border-red-500 animate-pulse'
-              }`}>
-                НАТЯЖЕНИЕ: {tensionStatus}
+              {/* HORIZONTAL TENSION TRACK */}
+              <div className="space-y-1">
+                <div className="flex justify-between font-arcade text-[8px] text-zinc-400">
+                  <span>ШКАЛА НАТЯЖЕНИЯ (ГОРИЗОНТАЛЬНАЯ):</span>
+                  <span className={tensionStatus === 'БЕЗОПАСНО' ? 'text-emerald-400' : 'text-red-400 animate-pulse font-bold'}>
+                    СТАТУС: {tensionStatus}
+                  </span>
+                </div>
+
+                <div 
+                  ref={trackRef}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  className="relative w-full h-16 bg-black/90 border-2 border-emerald-500 overflow-hidden shadow-inner cursor-ew-resize select-none touch-none"
+                  style={{ touchAction: 'none' }}
+                >
+                  {/* Subtle Grid Lines */}
+                  <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(16,185,129,0.1)_1px,transparent_1px)] bg-[size:40px_100%]" />
+
+                  {/* Fish Position Icon */}
+                  <div 
+                    className="absolute top-1 bottom-1 w-9 border-2 border-amber-400 bg-amber-500/40 flex items-center justify-center transition-all duration-75 text-sm select-none z-10"
+                    style={{ left: `calc(${fishPos}% - 18px)` }}
+                  >
+                    🐟
+                  </div>
+
+                  {/* Player Safe Bar (Horizontal) */}
+                  <div 
+                    className={`absolute top-0.5 bottom-0.5 border-2 transition-all duration-75 z-0 ${
+                      tensionStatus === 'БЕЗОПАСНО' 
+                        ? 'border-emerald-300 bg-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.6)]' 
+                        : 'border-red-400 bg-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.7)]'
+                    }`}
+                    style={{ 
+                      width: `${safeBarSize}%`,
+                      left: `calc(${barPos}% - ${safeBarSize / 2}%)` 
+                    }}
+                  />
+
+                  {/* Interactive Pointer / Finger Indicator */}
+                  {touchActive && fingerPos !== null && (
+                    <div 
+                      className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 shadow-[0_0_10px_#22d3ee] pointer-events-none z-20 flex flex-col items-center justify-between"
+                      style={{ left: `${fingerPos}%` }}
+                    >
+                      <div className="text-[10px] -mt-1">👆</div>
+                      <div className="text-[8px] font-mono text-cyan-300 bg-black/80 px-1 border border-cyan-400 -mb-1">ПАЛЕЦ</div>
+                    </div>
+                  )}
+
+                  {/* Webcam centroid point if active */}
+                  {cameraStatus === 'ACTIVE' && touchPosRef.current === null && (
+                    <div 
+                      className="absolute bottom-0 w-2 h-2 rounded-full bg-cyan-400 shadow-md"
+                      style={{ left: `${100 - handMotionY}%` }}
+                      title="Положение руки"
+                    />
+                  )}
+                </div>
               </div>
 
-              <div className="font-mono text-[10px] text-zinc-400 space-y-1 bg-[#06100a] p-2 border border-zinc-800">
-                {cameraStatus === 'ACTIVE' ? (
-                  <div>✋ Поднимай руку выше/ниже или жми <span className="text-emerald-400">[ЛКМ / ПРОБЕЛ]</span></div>
-                ) : (
-                  <div>🖱 Зажимай <span className="text-emerald-400">[ЛКМ / ПРОБЕЛ]</span> для подъема планки</div>
-                )}
+              {/* Status and Controls Footer */}
+              <div className="flex justify-between items-center text-[9px] font-mono text-zinc-400 pt-1">
+                <div>
+                  💻 Удерживай рыбу в зеленой зоне кликом/перетаскиванием мыши или <span className="text-emerald-400">[ПРОБЕЛ]</span>
+                </div>
+                <div className={`px-2 py-0.5 border font-arcade ${
+                  tensionStatus === 'БЕЗОПАСНО' ? 'bg-emerald-950 text-emerald-300 border-emerald-500' : 'bg-red-950 text-red-300 border-red-500 animate-pulse'
+                }`}>
+                  {tensionStatus === 'БЕЗОПАСНО' ? 'В ЗОНЕ' : 'ОПАСНОСТЬ СХОДА!'}
+                </div>
               </div>
 
             </div>
+          ) : (
+            /* =================== VERTICAL MODE (MOBILE / PHONE FINGER CONTROL) =================== */
+            <div className="pointer-events-auto flex items-center justify-center gap-4 sm:gap-6 p-4 sm:p-6 bg-[#040e08]/95 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.35)] pixel-corners max-h-[85vh]">
+              
+              {/* VERTICAL TENSION TRACK (OPTIMIZED FOR FINGER DRAG) */}
+              <div className="flex flex-col items-center gap-2">
+                <div className="font-arcade text-[8px] sm:text-[9px] text-emerald-400">
+                  ВЕДИ ПАЛЬЦЕМ 👆
+                </div>
 
-          </div>
+                <div 
+                  ref={trackRef}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  className="relative w-16 sm:w-20 h-[50vh] sm:h-[58vh] bg-black/95 border-2 border-emerald-500 overflow-hidden shadow-inner cursor-ns-resize select-none touch-none flex flex-col justify-end"
+                  style={{ touchAction: 'none' }}
+                >
+                  {/* Subtle Grid Lines */}
+                  <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(16,185,129,0.1)_1px,transparent_1px)] bg-[size:100%_40px]" />
+
+                  {/* Fish Position */}
+                  <div 
+                    className="absolute left-1 right-1 h-9 border-2 border-amber-400 bg-amber-500/40 flex items-center justify-center transition-all duration-75 text-base select-none z-10"
+                    style={{ bottom: `calc(${fishPos}% - 18px)` }}
+                  >
+                    🐟
+                  </div>
+
+                  {/* Player Tension Green Safe Bar */}
+                  <div 
+                    className={`absolute left-0.5 right-0.5 border-2 transition-all duration-75 z-0 ${
+                      tensionStatus === 'БЕЗОПАСНО' 
+                        ? 'border-emerald-300 bg-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.6)]' 
+                        : 'border-red-400 bg-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.7)]'
+                    }`}
+                    style={{ 
+                      height: `${safeBarSize}%`,
+                      bottom: `calc(${barPos}% - ${safeBarSize / 2}%)` 
+                    }}
+                  />
+
+                  {/* Finger indicator ring */}
+                  {touchActive && fingerPos !== null && (
+                    <div 
+                      className="absolute left-1 right-1 h-10 rounded-lg border-2 border-cyan-400 bg-cyan-400/30 flex items-center justify-center pointer-events-none z-20 shadow-[0_0_15px_#22d3ee]"
+                      style={{ bottom: `calc(${fingerPos}% - 20px)` }}
+                    >
+                      <span className="font-arcade text-[8px] text-cyan-200">👆 ПАЛЕЦ</span>
+                    </div>
+                  )}
+
+                  {/* Webcam centroid marker */}
+                  {cameraStatus === 'ACTIVE' && touchPosRef.current === null && (
+                    <div 
+                      className="absolute right-0 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-md"
+                      style={{ bottom: `${100 - handMotionY}%` }}
+                      title="Положение руки"
+                    />
+                  )}
+
+                </div>
+
+                <div className="font-arcade text-[8px] text-zinc-400">
+                  {tensionStatus === 'БЕЗОПАСНО' ? '✓ ЗАХВАТ' : '⚠ СХОД!'}
+                </div>
+              </div>
+
+              {/* Vertical Mode Side Telemetry */}
+              <div className="w-44 sm:w-52 space-y-4">
+                
+                {/* Unknown Fish Telemetry (No spoilers) */}
+                <div className="p-2.5 bg-black/60 border border-emerald-500/40 space-y-1">
+                  <div className="font-arcade text-[8px] text-zinc-400">ДОБЫЧА НА КРЮЧКЕ:</div>
+                  <div className="font-arcade text-xs text-emerald-300 tracking-wider animate-pulse">
+                    ??? НЕИЗВЕСТНО
+                  </div>
+                  <div className="font-mono text-[9px] text-zinc-400">
+                    Рывки: <span className="text-amber-400">{targetFish.catchDifficulty >= 4 ? 'СВИРЕПЫЕ' : 'БЫСТРЫЕ'}</span>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-1">
+                  <div className="flex justify-between font-arcade text-[9px]">
+                    <span className="text-zinc-400">ПРОГРЕСС:</span>
+                    <span className={catchProgress > 30 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold animate-pulse'}>
+                      {Math.round(catchProgress)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-4 bg-black border border-emerald-500 p-0.5">
+                    <div 
+                      className="h-full bg-gradient-to-r from-emerald-500 via-cyan-400 to-amber-300 transition-all duration-75"
+                      style={{ width: `${catchProgress}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Tension Status Indicator */}
+                <div className={`p-2 font-arcade text-[10px] text-center border ${
+                  tensionStatus === 'БЕЗОПАСНО'
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-500'
+                    : 'bg-red-950 text-red-300 border-red-500 animate-pulse'
+                }`}>
+                  НАТЯЖЕНИЕ: {tensionStatus}
+                </div>
+
+                {/* Mobile Finger Control Instructions */}
+                <div className="font-mono text-[10px] text-zinc-300 space-y-1.5 bg-[#06100a] p-2.5 border border-zinc-800 leading-tight">
+                  <div className="text-cyan-300 font-bold font-arcade text-[8px]">ИНСТРУКЦИЯ:</div>
+                  <div>👆 Прижми палец к шкале и веди вверх/вниз, удерживая рыбу в зеленой полосе!</div>
+                  <div className="text-[9px] text-zinc-500">При выходе из зоны леска рвется мгновенно.</div>
+                </div>
+
+              </div>
+
+            </div>
+          )
         )}
 
         {/* LOST Fish Alert */}
         {stage === 'LOST' && (
-          <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-2 pixel-corners animate-shake">
+          <div className="p-6 bg-red-950/90 border-2 border-red-500 text-center font-arcade text-red-300 space-y-2 pixel-corners animate-shake shadow-[0_0_40px_rgba(239,68,68,0.6)]">
             <div className="text-lg">РЫБА СОРВАЛАСЬ!</div>
-            <div className="text-xs text-zinc-400">Леска не выдержала натяжения или ослабла.</div>
+            <div className="text-xs text-zinc-300">Леска не выдержала натяжения. Будь точнее с контролем!</div>
           </div>
         )}
 
-        {/* CATCH SUCCESS Showcase Modal */}
+        {/* CATCH SUCCESS Showcase Modal (REVEAL ONLY AFTER CATCH!) */}
         {stage === 'CATCH_SUCCESS' && lastCaught && (
-          <div className="pointer-events-auto p-6 bg-[#08150f]/95 border-2 border-emerald-400 shadow-[0_0_50px_rgba(16,185,129,0.5)] text-center max-w-md w-full space-y-4 pixel-corners animate-in zoom-in-95 duration-200">
+          <div className="pointer-events-auto p-5 sm:p-6 bg-[#08150f]/95 border-2 border-emerald-400 shadow-[0_0_50px_rgba(16,185,129,0.5)] text-center max-w-md w-full space-y-4 pixel-corners animate-in zoom-in-95 duration-200">
             
             <div className="font-arcade text-xs text-amber-400 tracking-wider flex items-center justify-center gap-2">
               <Sparkles className="w-3.5 h-3.5" />
               <span>ТРОФЕЙ ВЫЛОВЛЕН!</span>
             </div>
 
-            {/* Fish Card Preview */}
-            <div className="relative aspect-[4/3] w-64 mx-auto border-2 border-amber-400 overflow-hidden bg-black shadow-lg">
+            {/* Fish Card Preview (REVEALED!) */}
+            <div className="relative aspect-[4/3] w-56 sm:w-64 mx-auto border-2 border-amber-400 overflow-hidden bg-black shadow-lg">
               <img
                 src={lastCaught.fish.cardImage}
                 alt={lastCaught.fish.name}
@@ -723,112 +1013,71 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
       </div>
 
-      {/* 4. Bottom Controls, Webcam Feed PiP & Sonar Radar */}
-      <div className="relative z-20 px-4 py-3 bg-[#06100a]/90 border-t border-emerald-500/40 flex flex-wrap justify-between items-end gap-4">
+      {/* 4. Bottom Controls & Live Camera Feed PiP (ECHOLOT COMPLETELY REMOVED!) */}
+      <div className="relative z-20 px-3 sm:px-4 py-2.5 bg-[#06100a]/90 border-t border-emerald-500/40 flex flex-wrap justify-between items-center gap-3">
         
-        {/* Quick Keyboard/Mouse Legend */}
-        <div className="hidden lg:flex flex-col gap-1 font-arcade text-[9px] text-zinc-400">
-          <div className="text-emerald-400 font-bold">УПРАВЛЕНИЕ:</div>
-          <div><span className="text-cyan-400">[КАМЕРА]</span> Взмах рукой для заброса и подсечки, высота руки для планки</div>
-          <div><span className="text-amber-400">[КЛАВИШИ]</span> Пробел / Клик мыши, зажатие для подъема</div>
+        {/* Quick Keyboard/Touch Legend */}
+        <div className="flex flex-col gap-0.5 font-arcade text-[8px] sm:text-[9px] text-zinc-400">
+          <div className="text-emerald-400 font-bold">СХЕМА УПРАВЛЕНИЯ:</div>
+          <div><span className="text-cyan-400">[ТЕЛЕФОН]</span> Прижми и веди палец по шкале натяжения</div>
+          <div><span className="text-amber-400">[ПК / МЫШЬ]</span> Горизонтальное перетаскивание мышью или зажатие Пробела</div>
         </div>
 
-        {/* Dual Dock: Live Webcam PiP + Deep Sea Sonar Radar */}
-        <div className="flex items-center gap-3 ml-auto">
-          
-          {/* WEBCAM MOTION PiP WINDOW */}
-          {cameraEnabled && (
-            <div className="w-36 sm:w-44 p-1.5 bg-[#09150f] border-2 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.25)] pixel-corners">
-              <div className="flex justify-between items-center pb-1 mb-1 border-b border-emerald-500/40 font-arcade text-[7px]">
-                <div className="flex items-center gap-1 text-emerald-400">
-                  <Camera className="w-2.5 h-2.5" />
-                  <span>ВЕБ-КАМЕРА</span>
-                </div>
-                <div className={cameraStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}>
-                  {cameraStatus === 'ACTIVE' ? 'ОНЛАЙН' : 'ПОИСК'}
-                </div>
-              </div>
-
-              <div className="relative aspect-video bg-black overflow-hidden border border-zinc-800">
-                <video
-                  ref={webcamVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform -scale-x-100"
-                />
-
-                {/* Hand Centroid Line */}
-                {cameraStatus === 'ACTIVE' && (
-                  <>
-                    <div 
-                      className="absolute left-0 right-0 h-0.5 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"
-                      style={{ top: `${handMotionY}%` }}
-                    />
-                    <div className="absolute top-1 left-1 px-1 bg-black/80 font-mono text-[7px] text-cyan-300">
-                      РУКА: {100 - handMotionY}%
-                    </div>
-                  </>
-                )}
-
-                {cameraStatus === 'DENIED' && (
-                  <div className="absolute inset-0 flex items-center justify-center p-2 text-center font-arcade text-[7px] text-red-400 bg-black/90">
-                    ДОСТУП ЗАПРЕЩЕН
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-1 flex justify-between font-arcade text-[7px] text-zinc-400">
-                <span>ДВИЖЕНИЕ:</span>
-                <span className="text-emerald-400">{motionIntensity}%</span>
-              </div>
-            </div>
-          )}
-
-          {/* Deep Sea Sonar Radar */}
-          <div className="w-36 sm:w-44 p-1.5 bg-[#09150f] border-2 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.25)] pixel-corners">
-            
-            <div className="flex justify-between items-center pb-1 mb-1 border-b border-emerald-500/40 font-arcade text-[7px]">
+        {/* Live Camera Feed PiP */}
+        {cameraEnabled && (
+          <div className="w-32 sm:w-40 p-1 bg-[#09150f] border-2 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.25)] pixel-corners ml-auto">
+            <div className="flex justify-between items-center pb-0.5 mb-0.5 border-b border-emerald-500/40 font-arcade text-[7px]">
               <div className="flex items-center gap-1 text-emerald-400">
-                <Radio className="w-2.5 h-2.5 animate-spin" />
-                <span>ЭХОЛОТ</span>
+                <Camera className="w-2 h-2" />
+                <span>ВЕБ-КАМЕРА</span>
               </div>
-              <div className="text-cyan-400">АКТИВЕН</div>
+              <div className={cameraStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}>
+                {cameraStatus === 'ACTIVE' ? '60 FPS' : 'ПОИСК'}
+              </div>
             </div>
 
-            {/* Radar Screen with sweeping radial animation */}
-            <div className="relative aspect-video bg-[#040c08] overflow-hidden border border-emerald-500/40 flex items-center justify-center">
-              <div className="absolute inset-1 rounded-full border border-emerald-500/20" />
-              <div className="absolute inset-3 rounded-full border border-emerald-500/30" />
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-
-              {/* Sonar Blip */}
-              <div 
-                className="absolute w-2 h-2 rounded-full bg-amber-400 animate-ping"
-                style={{
-                  top: `${40 + Math.sin(fishPos / 10) * 20}%`,
-                  left: `${50 + Math.cos(fishPos / 10) * 30}%`
-                }}
+            <div className="relative aspect-video bg-black overflow-hidden border border-zinc-800">
+              <video
+                ref={webcamVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
               />
 
-              <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/20 to-transparent pointer-events-none animate-spin origin-center" />
+              {/* Hand Centroid Line */}
+              {cameraStatus === 'ACTIVE' && (
+                <>
+                  <div 
+                    className="absolute left-0 right-0 h-0.5 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                    style={{ top: `${handMotionY}%` }}
+                  />
+                  <div className="absolute top-1 left-1 px-1 bg-black/80 font-mono text-[7px] text-cyan-300">
+                    РУКА: {100 - handMotionY}%
+                  </div>
+                </>
+              )}
+
+              {cameraStatus === 'DENIED' && (
+                <div className="absolute inset-0 flex items-center justify-center p-2 text-center font-arcade text-[7px] text-red-400 bg-black/90">
+                  ДОСТУП ЗАПРЕЩЕН
+                </div>
+              )}
             </div>
 
-            <div className="mt-1 flex justify-between font-arcade text-[7px] text-emerald-300">
-              <span>{depth}М</span>
-              <span className="text-cyan-400">{targetFish.rarity} ({targetFish.catchChance}%)</span>
+            <div className="mt-0.5 flex justify-between font-arcade text-[7px] text-zinc-400">
+              <span>ДВИЖЕНИЕ:</span>
+              <span className="text-emerald-400">{motionIntensity}%</span>
             </div>
-
           </div>
-
-        </div>
+        )}
 
       </div>
 
-      {/* 5. HOW TO PLAY GUIDE MODAL */}
+      {/* 5. HOW TO PLAY GUIDE MODAL (ECHOLOT REMOVED!) */}
       {isGuideOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-[#08150f] border-2 border-emerald-400 p-6 pixel-corners shadow-[0_0_50px_rgba(16,185,129,0.4)] space-y-6 max-h-[90vh] overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-[#08150f] border-2 border-emerald-400 p-5 sm:p-6 pixel-corners shadow-[0_0_50px_rgba(16,185,129,0.4)] space-y-5 max-h-[90vh] overflow-y-auto">
             
             {/* Header */}
             <div className="flex justify-between items-center border-b border-emerald-500/40 pb-3">
@@ -839,7 +1088,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     РУКОВОДСТВО РЫБОЛОВА RODMAX
                   </h3>
                   <p className="font-mono text-[10px] text-zinc-400 mt-0.5">
-                    Управление веб-камерой и клавиатурой / Правила вываживания
+                    Управление на ПК и смартфонах / Правила сложного вываживания
                   </p>
                 </div>
               </div>
@@ -853,7 +1102,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             </div>
 
             {/* 5 Step Walkthrough */}
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               
               {/* Step 1 */}
               <div className="p-3 bg-black/60 border border-emerald-500/40 flex items-start gap-3">
@@ -861,9 +1110,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   1
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-white">ВЕБ-КАМЕРА ИЛИ МЫШЬ</h4>
+                  <h4 className="font-arcade text-xs text-white">ПК ИЛИ СМАРТФОН</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Разрешите браузеру доступ к веб-камере для управления жестами рук в реальном времени. В любой момент можно играть кликами мыши или клавишей <strong className="text-emerald-400">[ПРОБЕЛ]</strong>.
+                    Игра автоматически подстраивается: <strong className="text-cyan-400">горизонтальная шкала</strong> для ПК (мышь / клавиатура) и <strong className="text-emerald-400">вертикальная шкала</strong> для телефона с прямым управлением пальцем.
                   </p>
                 </div>
               </div>
@@ -876,7 +1125,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-white">ЗАБРОС СНАСТИ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Сделайте взмах ладонью вверх перед объективом камеры либо нажмите <strong className="text-emerald-400">[ПРОБЕЛ]</strong> или кнопку «Забросить удочку». Блесна отправится на глубину.
+                    Сделайте взмах рукой перед камерой либо нажмите кнопку «Забросить удочку» (или <strong className="text-emerald-400">[ПРОБЕЛ]</strong>). Снасть уйдет на глубину.
                   </p>
                 </div>
               </div>
@@ -889,7 +1138,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 <div className="space-y-1">
                   <h4 className="font-arcade text-xs text-amber-300">ПОДСЕЧКА (! КЛЮЕТ !)</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Когда эхолот запищит и появится сигнал «! КЛЮЕТ !», резко взмахните рукой вверх перед камерой или быстро нажмите <strong className="text-amber-400">[ПРОБЕЛ]</strong>, чтобы подсечь рыбу.
+                    Когда раздастся сигнал и появится индикатор «! КЛЮЕТ !», мгновенно кликайте или нажимайте <strong className="text-amber-400">[ПРОБЕЛ]</strong> (или делайте резкий взмах рукой), чтобы подсечь рыбу.
                   </p>
                 </div>
               </div>
@@ -900,9 +1149,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   4
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-cyan-300">ВЫВАЖИВАНИЕ И БАЛАНС</h4>
+                  <h4 className="font-arcade text-xs text-cyan-300">СЛОЖНОЕ ВЫВАЖИВАНИЕ И КОНТРОЛЬ ПАЛЬЦЕМ</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Удерживайте зеленую полосу натяжения на рыбе. Поднимайте ладонь выше перед камерой (или зажимайте <strong className="text-cyan-400">[ЛКМ / ПРОБЕЛ]</strong>), чтобы поднимать планку. Опускайте руку, чтобы спускать. Заполните шкалу до 100%!
+                    Рыба сопротивляется непредсказуемо! На телефоне <strong className="text-emerald-300">веди пальцем по шкале</strong> прямо за рыбой. На ПК управляй мышью или удерживай пробел. Выход за зеленую зону молниеносно срывает рыбу!
                   </p>
                 </div>
               </div>
@@ -913,9 +1162,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   5
                 </div>
                 <div className="space-y-1">
-                  <h4 className="font-arcade text-xs text-emerald-400">САДОК И МОНЕТЫ</h4>
+                  <h4 className="font-arcade text-xs text-emerald-400">ТАЙНА УЛОВА И САДОК</h4>
                   <p className="font-mono text-xs text-zinc-300 leading-relaxed">
-                    Каждая выловленная рыба приносит опыт (EXP), попадает в садок и сохраняется в вашем Личном кабинете (во вкладке «ПРОФИЛЬ»). Там вы можете продать улов за монеты!
+                    Вид и редкость рыбы остаются в тайне до победного вылова. При заполнении шкалы до 100% открывается карточка трофея, начисляется EXP и улов сохраняется в вашем профиле!
                   </p>
                 </div>
               </div>
