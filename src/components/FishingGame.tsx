@@ -59,6 +59,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const lastReelClickTimeRef = useRef(0);
   const lastReportedMotionRef = useRef(0);
   const catchSuccessTimeRef = useRef(0);
+  const isLockedOnRef = useRef(false);
+  const lastReportedProgressRef = useRef(0);
   const [recastCooldown, setRecastCooldown] = useState(0);
 
   // Thumbs Up (👍) Gesture State
@@ -233,8 +235,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      canvas.width = 64;
-      canvas.height = 48;
+      if (canvas.width !== 64) canvas.width = 64;
+      if (canvas.height !== 48) canvas.height = 48;
       ctx.drawImage(video, 0, 0, 64, 48);
 
       const frame = ctx.getImageData(0, 0, 64, 48);
@@ -666,26 +668,32 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const waveX = Math.sin(now / 200) * (diffParams.swimSpeed * 3.5);
       const waveY = Math.cos(now / 230) * (diffParams.swimSpeed * 3.5);
 
+      // Base swimming velocity:
+      let vx = Math.cos(angle) * moveStep + waveX;
+      let vy = Math.sin(angle) * moveStep + waveY;
+
       // 2. ACTIVE PLAYER POSITION (Exclusively Webcam Fingertip Tracking)
       const activePlayerPos: Position2D = handPosRef.current;
 
-      // 3. LOCK-ON DISTANCE CHECK
+      // 3. LOCK-ON DISTANCE CHECK WITH HYSTERESIS (Eliminates high-frequency boundary chatter)
       const distX = activePlayerPos.x - fishPosRef.current.x;
       const distY = activePlayerPos.y - fishPosRef.current.y;
       const distance = Math.hypot(distX, distY);
-      const isLocked = distance <= diffParams.targetRadius;
 
-      // 4. EVASION BEHAVIOR: Fish actively bolts away if player's finger is inside catch radius
-      let evasionX = 0;
-      let evasionY = 0;
+      const enterRadius = diffParams.targetRadius;
+      const exitRadius = diffParams.targetRadius + 2.0;
+      const isLocked = isLockedOnRef.current ? (distance <= exitRadius) : (distance <= enterRadius);
+      isLockedOnRef.current = isLocked;
+
+      // 4. EVASION BEHAVIOR: Continuous escape velocity (Smooth acceleration, ZERO teleport jitter)
       if (isLocked && diffParams.evasion > 0) {
         const safeDist = distance || 1;
-        // Controlled repulsion vector pushing fish away smoothly
-        evasionX = - (distX / safeDist) * diffParams.evasion * 10;
-        evasionY = - (distY / safeDist) * diffParams.evasion * 10;
+        const escapeSpeed = diffParams.swimSpeed * 5 * diffParams.evasion;
+        vx -= (distX / safeDist) * escapeSpeed;
+        vy -= (distY / safeDist) * escapeSpeed;
 
-        // High rarity agile feints (sudden dart bursts across the arena)
-        if (diffParams.evasion >= 0.15 && Math.random() < 0.08) {
+        // Occasional agile feint towards a new target
+        if (diffParams.evasion >= 0.15 && Math.random() < 0.05) {
           fishTargetRef.current = {
             x: 8 + Math.random() * 84,
             y: 10 + Math.random() * 80
@@ -694,8 +702,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       }
 
       // Apply dynamic velocity with arena boundary protection
-      const nextX = fishPosRef.current.x + Math.cos(angle) * moveStep + waveX + evasionX;
-      const nextY = fishPosRef.current.y + Math.sin(angle) * moveStep + waveY + evasionY;
+      const nextX = fishPosRef.current.x + vx;
+      const nextY = fishPosRef.current.y + vy;
 
       fishPosRef.current.x = Math.max(6, Math.min(94, nextX));
       fishPosRef.current.y = Math.max(8, Math.min(92, nextY));
@@ -705,7 +713,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         y: Math.round(fishPosRef.current.y * 10) / 10
       });
 
-      setIsLockedOn(isLocked);
+      setIsLockedOn((prev) => (prev !== isLocked ? isLocked : prev));
 
       // 5. CUMULATIVE OFF-TARGET TIMEOUT (User Requirement: 1.5s cumulative across the round)
       if (!isLocked) {
@@ -721,7 +729,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
       }
 
-      // 6. PROGRESS CALCULATION (Smooth decimal fill)
+      // 6. PROGRESS CALCULATION
       if (isLocked) {
         if (now - lastReelClickTimeRef.current >= 180) {
           sound.playReelClick();
@@ -739,8 +747,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         currentProgressRef.current = Math.max(0, currentProgressRef.current - diffParams.loss);
       }
 
-      // Keep smooth float in state for buttery rendering
-      setCatchProgress(Math.round(currentProgressRef.current * 10) / 10);
+      // Keep integer percentage in state to prevent redundant micro-renders
+      const roundedProgress = Math.round(currentProgressRef.current);
+      if (roundedProgress !== lastReportedProgressRef.current) {
+        lastReportedProgressRef.current = roundedProgress;
+        setCatchProgress(roundedProgress);
+      }
 
       // 7. CATCH LANDING (1.0s acceptance window) OR ZERO-PROGRESS LOST TRIGGER
       if (currentProgressRef.current >= 100) {
@@ -1343,8 +1355,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   <div 
                     className={`absolute inset-0 rounded-full border-2 transition-colors duration-150 ${
                       isLockedOn 
-                        ? 'border-emerald-400 bg-emerald-500/30 shadow-[0_0_25px_#10b981]' 
-                        : 'border-amber-400 border-dashed bg-amber-500/10 shadow-[0_0_12px_#f59e0b]'
+                        ? 'border-emerald-400 bg-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.5)]' 
+                        : 'border-amber-400 border-dashed bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.3)]'
                     }`}
                   />
 
@@ -1377,8 +1389,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   >
                     <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
                       isLockedOn 
-                        ? 'border-emerald-300 bg-emerald-400/30 shadow-[0_0_20px_#10b981]' 
-                        : 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_15px_#22d3ee]'
+                        ? 'border-emerald-300 bg-emerald-400/25 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
+                        : 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
                     }`}>
                       <span className="text-lg filter drop-shadow-[0_0_6px_rgba(34,211,238,0.8)]">☝️</span>
                     </div>
