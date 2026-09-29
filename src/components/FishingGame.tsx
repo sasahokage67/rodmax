@@ -63,9 +63,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const lastReportedProgressRef = useRef(0);
   const lastCastTimeRef = useRef(0);
 
-  // Thumbs Up (👍) Gesture Detection State
+  // Thumbs Up (👍) Gesture Detection & Cast Charge State
   const [isThumbsUp, setIsThumbsUp] = useState(false);
+  const [thumbsUpHoldProgress, setThumbsUpHoldProgress] = useState(0);
   const thumbsUpCounterRef = useRef(0);
+  const thumbsUpHoldCountRef = useRef(0);
+  const idleEnterTimeRef = useRef(Date.now());
 
   // Assistance & Hints State (idle hint and consecutive fails assistance)
   const [showIdleHint, setShowIdleHint] = useState(false);
@@ -230,9 +233,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     };
   }, []);
 
-  // Idle Hint Timer: triggers if player waits in IDLE for > 6.5 seconds
+  // Idle Hint Timer & Grace Period Tracker
   useEffect(() => {
     if (stage === 'IDLE') {
+      idleEnterTimeRef.current = Date.now();
+      thumbsUpHoldCountRef.current = 0;
+      setThumbsUpHoldProgress(0);
       idleTimerRef.current = setTimeout(() => {
         setShowIdleHint(true);
       }, 6500);
@@ -242,6 +248,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         idleTimerRef.current = null;
       }
       setShowIdleHint(false);
+      thumbsUpHoldCountRef.current = 0;
+      setThumbsUpHoldProgress(0);
     }
 
     return () => {
@@ -420,7 +428,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             }
           }
 
-          // Leaky integrator: fast attack (+2), slow decay (-1) -> instant 1-frame trigger, zero flicker!
+          // Leaky integrator: fast attack (+2), slow decay (-1) -> instant trigger, zero flicker
           if (isCandidate) {
             thumbsUpCounterRef.current = Math.min(4, thumbsUpCounterRef.current + 2);
           } else {
@@ -429,9 +437,37 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
           const thumbsUpActive = thumbsUpCounterRef.current >= 2;
           setIsThumbsUp(thumbsUpActive);
+
+          // Hold-to-Cast with Thumbs Up (👍) in IDLE stage
+          // 1.2s grace period on entry prevents immediate accidental bite on load
+          const now = Date.now();
+          const isEligibleToCast = stage === 'IDLE' && (now - idleEnterTimeRef.current >= 1200);
+
+          if (isEligibleToCast) {
+            if (thumbsUpActive) {
+              thumbsUpHoldCountRef.current = Math.min(10, thumbsUpHoldCountRef.current + 1);
+            } else {
+              thumbsUpHoldCountRef.current = Math.max(0, thumbsUpHoldCountRef.current - 2);
+            }
+
+            const progress = Math.round((thumbsUpHoldCountRef.current / 10) * 100);
+            setThumbsUpHoldProgress(progress);
+
+            // Cast triggers when held for 0.3s (10 frames)
+            if (progress >= 100) {
+              handleCast();
+              thumbsUpHoldCountRef.current = 0;
+              setThumbsUpHoldProgress(0);
+            }
+          } else {
+            thumbsUpHoldCountRef.current = 0;
+            setThumbsUpHoldProgress(0);
+          }
         } else {
           thumbsUpCounterRef.current = 0;
+          thumbsUpHoldCountRef.current = 0;
           setIsThumbsUp(false);
+          setThumbsUpHoldProgress(0);
         }
       }
 
@@ -457,6 +493,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setIsFoul(false);
     setFoulTimeLeft(2.0);
     setShowIdleHint(false);
+    thumbsUpHoldCountRef.current = 0;
+    setThumbsUpHoldProgress(0);
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
@@ -1108,6 +1146,39 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
 
 
+            {/* Gesture Thumbs Up Charge Widget */}
+            <div className={`p-3 border transition-all duration-150 pixel-corners ${
+              thumbsUpHoldProgress > 0 
+                ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.7)]' 
+                : isThumbsUp 
+                ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
+                : 'bg-black/60 border-zinc-700/80 text-zinc-300'
+            }`}>
+              <div className="font-arcade text-xs flex items-center justify-center gap-2">
+                <span className={`text-xl ${thumbsUpHoldProgress > 0 ? 'animate-bounce' : ''}`}>👍</span>
+                <span>
+                  {thumbsUpHoldProgress >= 100
+                    ? 'ЗАБРОС УДОЧКИ!'
+                    : thumbsUpHoldProgress > 0
+                    ? `УДЕРЖИВАЙТЕ ЛАЙК: ${thumbsUpHoldProgress}%`
+                    : 'ПОКАЖИТЕ ЖЕСТ «ЛАЙК» (👍) ДЛЯ СТАРТА'}
+                </span>
+              </div>
+
+              {/* Charge Progress Bar */}
+              <div className="w-full bg-zinc-800 h-2 mt-2 rounded-full overflow-hidden border border-zinc-700">
+                <div 
+                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 transition-all duration-75 shadow-[0_0_8px_#10b981]"
+                  style={{ width: `${thumbsUpHoldProgress}%` }}
+                />
+              </div>
+
+              <div className="font-mono text-[8px] text-zinc-400 mt-1 flex justify-between items-center">
+                <span>Удерживайте 0.3 сек</span>
+                <span>Или кликните кнопку ниже</span>
+              </div>
+            </div>
+
             <button
               onClick={handleCast}
               className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-arcade text-xs tracking-wider border-2 border-emerald-300 shadow-[0_3px_0_#064e3b] transition-all cursor-pointer"
@@ -1564,7 +1635,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             <Camera className="w-3.5 h-3.5 text-emerald-400" />
             <span>ОПТИЧЕСКИЙ ТРЕКИНГ ЖЕСТОВ:</span>
           </div>
-          <div><span className="text-cyan-400">[ЗАБРОС]</span> Кнопка «ЗАБРОСИТЬ УДОЧКУ» мышью или Space</div>
+          <div><span className="text-cyan-400">[ЗАБРОС]</span> Жест «Лайк» (👍) в камеру (0.3с) или кнопка мышью</div>
           <div><span className="text-amber-400">[ПОДСЕЧКА]</span> Резко подвиньте палец в камеру (окно 0.75 сек)</div>
           <div><span className="text-red-400">[ОШИБКА]</span> Рывок раньше поклевки = фальстарт (штраф 2 сек)</div>
           <div><span className="text-emerald-400">[ВЫВАЖИВАНИЕ]</span> Держите указательный палец на рыбе (срыв при потере 1.5с)</div>
