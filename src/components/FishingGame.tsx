@@ -105,47 +105,47 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Initial progress by rarity tier
   const getInitialProgress = (rarity: RarityType) => {
     switch (rarity) {
-      case 'COMMON': return 50;
-      case 'UNCOMMON': return 45;
-      case 'RARE': return 40;
-      case 'EPIC': return 35;
-      case 'MYTHIC': return 30;
-      case 'SECRET': return 25;
-      case 'GODLY': return 20;
-      case 'ARCANE': return 15;
-      default: return 35;
+      case 'COMMON': return 40;
+      case 'UNCOMMON': return 30;
+      case 'RARE': return 25;
+      case 'EPIC': return 20;
+      case 'MYTHIC': return 15;
+      case 'SECRET': return 12;
+      case 'GODLY': return 10;
+      case 'ARCANE': return 8;
+      default: return 25;
     }
   };
 
-  // Scaled Difficulty Parameters based on Fish Rarity
+  // Scaled Difficulty Parameters based on Fish Rarity (Enhanced challenge for lively fish)
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
-        // Boot: huge radius, gentle glide, fast easy catch
-        return { targetRadius: 36, swimSpeed: 0.05, gain: 2.2, loss: 0.35, changeInterval: 50, evasion: 0 };
+        // Boot: radius 26, steady glide
+        return { targetRadius: 26, swimSpeed: 0.12, gain: 1.6, loss: 0.55, changeInterval: 42, evasion: 0.06 };
       case 'UNCOMMON':
-        // Salmon: broad radius, steady swim
-        return { targetRadius: 28, swimSpeed: 0.09, gain: 1.8, loss: 0.45, changeInterval: 38, evasion: 0.04 };
+        // Salmon: tightened radius 18, lively swim speed 0.20, evasion 0.18
+        return { targetRadius: 18, swimSpeed: 0.20, gain: 1.25, loss: 0.75, changeInterval: 24, evasion: 0.18 };
       case 'RARE':
-        // Goldfish: medium radius, lively darting
-        return { targetRadius: 22, swimSpeed: 0.15, gain: 1.4, loss: 0.55, changeInterval: 28, evasion: 0.10 };
+        // Goldfish: radius 15, dynamic darting
+        return { targetRadius: 15, swimSpeed: 0.26, gain: 1.05, loss: 0.85, changeInterval: 18, evasion: 0.24 };
       case 'EPIC':
-        // Anglerfish: compact radius, fast turns, evasion
-        return { targetRadius: 16, swimSpeed: 0.24, gain: 1.1, loss: 0.70, changeInterval: 20, evasion: 0.20 };
+        // Anglerfish: compact radius 12.5, fast turns
+        return { targetRadius: 12.5, swimSpeed: 0.35, gain: 0.90, loss: 0.95, changeInterval: 14, evasion: 0.32 };
       case 'MYTHIC':
-        // Megalodon: tight radius (12%), fast predator, fierce evasion and bursts
-        return { targetRadius: 12, swimSpeed: 0.36, gain: 0.85, loss: 0.85, changeInterval: 14, evasion: 0.35 };
+        // Megalodon: tight radius 10%, fierce speed and sharp evasion
+        return { targetRadius: 10, swimSpeed: 0.45, gain: 0.75, loss: 1.05, changeInterval: 11, evasion: 0.42 };
       case 'SECRET':
-        // Abyssal Leviathan: small radius (10%), rapid sweeps, heavy feints
-        return { targetRadius: 10, swimSpeed: 0.46, gain: 0.70, loss: 1.0, changeInterval: 10, evasion: 0.45 };
+        // Abyssal Leviathan: small radius 8.5%, fast feints
+        return { targetRadius: 8.5, swimSpeed: 0.55, gain: 0.60, loss: 1.20, changeInterval: 8, evasion: 0.52 };
       case 'GODLY':
-        // Celestial Whale: tiny radius (8%), high speed darting, aggressive evasion
-        return { targetRadius: 8, swimSpeed: 0.58, gain: 0.55, loss: 1.2, changeInterval: 8, evasion: 0.60 };
+        // Celestial Whale: tiny radius 7.0%, aggressive zig-zagging
+        return { targetRadius: 7.0, swimSpeed: 0.68, gain: 0.48, loss: 1.35, changeInterval: 6, evasion: 0.65 };
       case 'ARCANE':
-        // Neon Jellyfish: pinpoint radius (6.5%), supreme agility, lightning evasive bursts
-        return { targetRadius: 6.5, swimSpeed: 0.72, gain: 0.45, loss: 1.4, changeInterval: 5, evasion: 0.80 };
+        // Neon Jellyfish: supreme agility 5.5% radius, lightning evasive bursts
+        return { targetRadius: 5.5, swimSpeed: 0.82, gain: 0.38, loss: 1.60, changeInterval: 4, evasion: 0.88 };
       default:
-        return { targetRadius: 20, swimSpeed: 0.15, gain: 1.4, loss: 0.55, changeInterval: 28, evasion: 0.10 };
+        return { targetRadius: 16, swimSpeed: 0.22, gain: 1.1, loss: 0.75, changeInterval: 20, evasion: 0.20 };
     }
   };
 
@@ -315,13 +315,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           }
 
           let isThumbsUpFrame = false;
-          if (skinCount >= 22 && (handMaxY - handMinY) >= 10 && (handMaxX - handMinX) >= 7) {
+          // Must have substantial skin pixels and realistic hand box
+          if (skinCount >= 32 && (handMaxY - handMinY) >= 12 && (handMaxX - handMinX) >= 9) {
             const handH = handMaxY - handMinY + 1;
             const handW = handMaxX - handMinX + 1;
-            const thumbCutoffY = handMinY + Math.floor(handH * 0.38);
+            // The thumb region is the top 32%
+            const thumbCutoffY = handMinY + Math.floor(handH * 0.32);
 
             let thumbPixels = 0;
             let thumbMinX = 64, thumbMaxX = 0;
+            let thumbMinY = 48, thumbMaxY = 0;
             let fistPixels = 0;
             let fistMinX = 64, fistMaxX = 0;
 
@@ -335,6 +338,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     thumbPixels++;
                     if (x < thumbMinX) thumbMinX = x;
                     if (x > thumbMaxX) thumbMaxX = x;
+                    if (y < thumbMinY) thumbMinY = y;
+                    if (y > thumbMaxY) thumbMaxY = y;
                   } else {
                     fistPixels++;
                     if (x < fistMinX) fistMinX = x;
@@ -345,30 +350,37 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             }
 
             const thumbWidth = thumbMaxX >= thumbMinX ? (thumbMaxX - thumbMinX + 1) : 0;
+            const thumbHeight = thumbMaxY >= thumbMinY ? (thumbMaxY - thumbMinY + 1) : 0;
             const fistWidth = fistMaxX >= fistMinX ? (fistMaxX - fistMinX + 1) : 0;
+            const fistMidX = (fistMinX + fistMaxX) / 2;
+            const thumbMidX = (thumbMinX + thumbMaxX) / 2;
 
-            // Thumbs Up: narrow protruding thumb on top (thumbWidth <= fistWidth * 0.72)
-            // dense fist base (fistPixels >= thumbPixels * 1.25)
-            // vertical aspect ratio: handH >= handW * 0.72
-            if (
-              thumbPixels >= 5 &&
-              fistPixels >= 15 &&
-              fistPixels >= thumbPixels * 1.25 &&
-              thumbWidth > 0 &&
-              thumbWidth <= fistWidth * 0.72 &&
-              handH >= handW * 0.72
-            ) {
+            // STRICT THUMBS UP RULES (Excludes Index Finger ☝️):
+            // 1. LATERAL THUMB: Thumb must stick out on the left or right side of the fist
+            const isLateral = fistWidth > 0 && Math.abs(thumbMidX - fistMidX) >= fistWidth * 0.16;
+
+            // 2. FIST HEAVINESS: The fist is a clenched ball with at least 2.2x the thumb mass
+            const isFistBulky = fistPixels >= 26 && fistPixels >= thumbPixels * 2.2;
+
+            // 3. THUMB STUBBINESS: Thumb is wide (>=3px) and NOT slender like a long index finger
+            const isThumbStubby = thumbWidth >= 3 && thumbWidth <= fistWidth * 0.60 && (thumbHeight / (thumbWidth || 1) <= 2.2);
+
+            // 4. BALANCED ASPECT RATIO: Hand box is not overly elongated
+            const isAspectValid = handH >= handW * 0.82 && handH <= handW * 1.55;
+
+            if (thumbPixels >= 6 && isLateral && isFistBulky && isThumbStubby && isAspectValid) {
               isThumbsUpFrame = true;
             }
           }
 
           if (isThumbsUpFrame) {
-            thumbsUpCounterRef.current = Math.min(6, thumbsUpCounterRef.current + 1);
+            thumbsUpCounterRef.current = Math.min(8, thumbsUpCounterRef.current + 1);
           } else {
             thumbsUpCounterRef.current = Math.max(0, thumbsUpCounterRef.current - 1);
           }
 
-          const isThumbsUpActive = thumbsUpCounterRef.current >= 3;
+          // Require 4 consecutive frames (~180ms) for rock-solid confirmation
+          const isThumbsUpActive = thumbsUpCounterRef.current >= 4;
           setIsThumbsUp(isThumbsUpActive);
 
           // 1. GESTURE: Thumbs Up (👍) launches Cast from IDLE or CATCH_SUCCESS (no mouse needed!)
@@ -441,7 +453,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setTimeout(() => {
       sound.playSplash();
       setStage('WAITING');
-      const biteDelay = 2200 + Math.random() * 2500;
+      const biteDelay = 3500 + Math.random() * 4000; // 3.5s to 7.5s realistic suspense
       scheduleBite(biteDelay);
     }, 900);
   };
@@ -505,9 +517,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setIsFoul(true);
     setFoulTimeLeft(2.0);
 
-    // Push back bite by adding 2.0s penalty
+    // Push back bite by adding 2.0s penalty + 3.5s to 6.5s calm-down delay
     if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
-    const penaltyDelay = 2000 + Math.random() * 1200;
+    const penaltyDelay = 2000 + 3500 + Math.random() * 3000;
     waitingTimerRef.current = setTimeout(() => {
       triggerBiteSequence();
     }, penaltyDelay);
