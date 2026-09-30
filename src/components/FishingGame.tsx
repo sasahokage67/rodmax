@@ -45,9 +45,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const targetFishRef = useRef<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
   const [isCatchCardRevealed, setIsCatchCardRevealed] = useState(false);
-  const [catchCinematicProgress, setCatchCinematicProgress] = useState(0);
   const catchCinematicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const catchCinematicIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
@@ -266,7 +264,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       if (foulIntervalRef.current) clearInterval(foulIntervalRef.current);
       if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
       if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
-      if (catchCinematicIntervalRef.current) clearInterval(catchCinematicIntervalRef.current);
     };
   }, []);
 
@@ -834,12 +831,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearTimeout(catchCinematicTimerRef.current);
       catchCinematicTimerRef.current = null;
     }
-    if (catchCinematicIntervalRef.current) {
-      clearInterval(catchCinematicIntervalRef.current);
-      catchCinematicIntervalRef.current = null;
-    }
     setIsCatchCardRevealed(false);
-    setCatchCinematicProgress(0);
 
     sound.playCast();
     setStage('CASTING');
@@ -1181,11 +1173,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearTimeout(catchCinematicTimerRef.current);
       catchCinematicTimerRef.current = null;
     }
-    if (catchCinematicIntervalRef.current) {
-      clearInterval(catchCinematicIntervalRef.current);
-      catchCinematicIntervalRef.current = null;
+    if (mainVideoRef.current) {
+      mainVideoRef.current.pause();
     }
-    setCatchCinematicProgress(100);
     setIsCatchCardRevealed(true);
 
     const currentFish = targetFishRef.current || targetFish;
@@ -1237,6 +1227,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Pointer Handlers: ONLY allow touch/pen for screen drag
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (stage === 'CATCH_SUCCESS' && !isCatchCardRevealed) {
+      revealCatchCard();
+      return;
+    }
     if (stage === 'WAITING') {
       triggerEarlyFoul();
       return;
@@ -1317,31 +1311,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     consecutiveFailsRef.current = 0;
     setConsecutiveFails(0);
 
-    // 1. Enter CATCH_SUCCESS in cinematic animation mode (card NOT yet revealed)
+    // 1. Enter CATCH_SUCCESS in video animation mode (card NOT yet revealed)
     setIsCatchCardRevealed(false);
-    setCatchCinematicProgress(0);
     setStage('CATCH_SUCCESS');
+    stageRef.current = 'CATCH_SUCCESS';
 
     // Audio: water splash & reel click
     sound.playSplash();
     sound.playReelClick();
 
-    // 2. Play cinematic hauling sequence over 2.6 seconds
+    // 2. Clear old timer and set fallback safety timer (7.5s) in case onEnded event does not fire
     if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
-    if (catchCinematicIntervalRef.current) clearInterval(catchCinematicIntervalRef.current);
-
-    const startTime = Date.now();
-    const duration = 2600; // 2.6 seconds animation
-
-    catchCinematicIntervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(100, Math.round((elapsed / duration) * 100));
-      setCatchCinematicProgress(progress);
-    }, 40);
-
     catchCinematicTimerRef.current = setTimeout(() => {
       revealCatchCard();
-    }, duration);
+    }, 7500);
   };
 
   const triggerLost = (reason?: string) => {
@@ -1387,16 +1370,35 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       <canvas ref={motionCanvasRef} className="hidden" />
 
       {/* 1. Main Viewport Video Background */}
-      <div className="absolute inset-0 z-0">
-        {stage === 'CATCH_SUCCESS' && targetFish.catchVideo ? (
+      <div className="absolute inset-0 z-0 bg-black">
+        {stage === 'CATCH_SUCCESS' && (lastCaught?.fish?.catchVideo || targetFish.catchVideo) ? (
           <video
-            key={targetFish.catchVideo}
+            key={lastCaught?.id || `catch_${targetFish.id}`}
             ref={mainVideoRef}
-            src={targetFish.catchVideo}
+            src={lastCaught?.fish?.catchVideo || targetFish.catchVideo}
             autoPlay
-            loop
+            loop={false}
             muted
             playsInline
+            onLoadedMetadata={(e) => {
+              const dur = e.currentTarget.duration;
+              if (dur && !isNaN(dur) && isFinite(dur)) {
+                if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
+                catchCinematicTimerRef.current = setTimeout(() => {
+                  revealCatchCard();
+                }, (dur + 0.5) * 1000);
+              }
+            }}
+            onEnded={() => {
+              if (catchCinematicTimerRef.current) {
+                clearTimeout(catchCinematicTimerRef.current);
+                catchCinematicTimerRef.current = null;
+              }
+              if (mainVideoRef.current) {
+                mainVideoRef.current.pause();
+              }
+              revealCatchCard();
+            }}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -1414,7 +1416,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         )}
       </div>
 
-      <div className="absolute inset-0 scanlines pointer-events-none z-10" />
+      {stage !== 'CATCH_SUCCESS' && (
+        <div className="absolute inset-0 scanlines pointer-events-none z-10" />
+      )}
 
       {/* 2. Top Game HUD */}
       <div className="relative z-20 px-3 sm:px-4 py-2 bg-[#06100a]/90 border-b border-emerald-500/50 backdrop-blur-md flex flex-wrap justify-between items-center gap-2 text-xs font-arcade">
@@ -1984,60 +1988,15 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* CATCH CINEMATIC SEQUENCE (Watch the fish jump / emerge before card appears!) */}
+        {/* Sleek, non-intrusive skip button while the catch animation video plays */}
         {stage === 'CATCH_SUCCESS' && lastCaught && !isCatchCardRevealed && (
-          <div className="absolute inset-0 z-30 pointer-events-auto flex flex-col justify-between p-4 sm:p-8 bg-gradient-to-b from-black/85 via-black/25 to-black/90 animate-in fade-in duration-300">
-            {/* Top Cinematic Trophy Alert Bar */}
-            <div className="flex flex-col items-center gap-2 pt-2 sm:pt-4 text-center">
-              <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] sm:text-xs text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.5)] animate-pulse">
-                <Sparkles className="w-4 h-4 text-yellow-300" />
-                <span>{language === 'ru' ? '⚡ ТРОФЕЙ НА КРЮЧКЕ! ВЫВАЖИВАНИЕ... ⚡' : '⚡ TROPHY HOOKED! REELING IN... ⚡'}</span>
-              </div>
-              <h2 className="font-arcade text-xl sm:text-3xl text-white tracking-widest filter drop-shadow-[0_0_15px_rgba(52,211,153,0.9)] animate-pulse">
-                {getFishName(lastCaught.fish, language)}
-              </h2>
-              <div className="text-[10px] sm:text-xs font-mono text-cyan-300 tracking-widest uppercase bg-black/70 px-3 py-0.5 border border-cyan-500/40">
-                {language === 'ru' ? 'ОКЕАНСКИЙ ТРОФЕЙ ВЫПРЫГИВАЕТ НА ПОВЕРХНОСТЬ' : 'SURFACING THROUGH OCEAN SWELLS'}
-              </div>
-            </div>
-
-            {/* Center Dynamic Splash Ring Shockwave */}
-            <div className="flex-1 flex items-center justify-center relative pointer-events-none">
-              <div className="relative flex items-center justify-center">
-                <div className="w-48 h-48 sm:w-72 sm:h-72 rounded-full border-2 border-emerald-400/30 animate-ping absolute" />
-                <div className="w-36 h-36 sm:w-56 sm:h-56 rounded-full border border-cyan-400/50 animate-pulse absolute shadow-[0_0_35px_rgba(34,211,238,0.4)]" />
-                <div className="p-4 sm:p-5 bg-black/75 border-2 border-emerald-400/80 rounded-full backdrop-blur-md shadow-[0_0_30px_rgba(16,185,129,0.7)]">
-                  <span className="text-4xl sm:text-6xl filter drop-shadow-[0_0_15px_#10b981] select-none">🎣</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Cinematic Haul Progress Bar & Skip Button */}
-            <div className="max-w-md w-full mx-auto space-y-3 pb-2 sm:pb-4">
-              <div className="space-y-1.5 bg-black/90 p-3 sm:p-4 border-2 border-emerald-500/70 backdrop-blur-md shadow-[0_0_25px_rgba(16,185,129,0.35)]">
-                <div className="flex justify-between font-arcade text-[10px] sm:text-xs">
-                  <span className="text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span>{language === 'ru' ? 'ПОДЪЕМ ДОБЫЧИ НА БОРТ:' : 'HAULING TROPHY ONTO DECK:'}</span>
-                  </span>
-                  <span className="text-amber-300 font-bold font-mono">{Math.round(catchCinematicProgress)}%</span>
-                </div>
-                <div className="w-full h-3 sm:h-4 bg-zinc-950 border border-emerald-400/60 p-0.5 overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 shadow-[0_0_14px_#34d399] transition-all duration-75"
-                    style={{ width: `${Math.min(100, Math.max(0, catchCinematicProgress))}%` }}
-                  />
-                </div>
-              </div>
-
-              <button
-                onClick={revealCatchCard}
-                className="w-full py-2.5 sm:py-3 bg-zinc-900/95 hover:bg-emerald-950/80 text-zinc-200 hover:text-emerald-300 font-arcade text-xs border border-zinc-600 hover:border-emerald-400 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-98"
-              >
-                <span>[ {language === 'ru' ? 'ПРОПУСТИТЬ АНИМАЦИЮ (ПРОБЕЛ)' : 'SKIP ANIMATION (SPACE)'} ]</span>
-                <ChevronRight className="w-4 h-4 text-emerald-400" />
-              </button>
-            </div>
+          <div className="absolute bottom-6 right-6 z-30 pointer-events-auto">
+            <button
+              onClick={revealCatchCard}
+              className="py-1 px-3 bg-black/60 hover:bg-black/90 text-zinc-400 hover:text-emerald-300 font-arcade text-[8px] sm:text-[9px] border border-white/10 hover:border-emerald-500/50 backdrop-blur-sm transition-all shadow-md"
+            >
+              [ {language === 'ru' ? 'ПРОПУСТИТЬ: ПРОБЕЛ' : 'SKIP: SPACE'} ]
+            </button>
           </div>
         )}
 
