@@ -17,7 +17,8 @@ import {
   Target,
   Crosshair,
   Lightbulb,
-  AlertCircle
+  AlertCircle,
+  ChevronRight
 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getFishName, getFishDescription, getRarityName } from '../i18n/translations';
@@ -41,6 +42,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [stage, setStage] = useState<GameStage>('IDLE');
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
+  const [isCatchCardRevealed, setIsCatchCardRevealed] = useState(false);
+  const [catchCinematicProgress, setCatchCinematicProgress] = useState(0);
+  const catchCinematicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const catchCinematicIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
@@ -252,6 +257,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
       if (foulIntervalRef.current) clearInterval(foulIntervalRef.current);
       if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
+      if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
+      if (catchCinematicIntervalRef.current) clearInterval(catchCinematicIntervalRef.current);
     };
   }, []);
 
@@ -329,8 +336,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let motionWeightedY = 0;
         let motionPoints = 0;
 
+        const rawSkinMask = new Uint8Array(128 * 96);
         const skinMask = new Uint8Array(128 * 96);
+        const isFaceZone = new Uint8Array(128 * 96);
 
+        // --- PASS 1: Background Subtraction, MHI & Human Skin Chromaticity ---
         for (let i = 0; i < data.length; i += 4) {
           const r = data[i];
           const g = data[i+1];
@@ -341,8 +351,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const diff = Math.abs(lumNow - lumPrev);
 
           const pixelIdx = i / 4;
-          const x = pixelIdx % 128;
-          const y = Math.floor(pixelIdx / 128);
 
           // 1. Running Background Subtraction (Foreground vs Background Wall/Painting)
           const bgR = bg[i];
@@ -358,15 +366,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           }
 
           // 2. Motion History Image (MHI): Tracks recent activity for 45 ticks (~1.5s)
-          // Static objects (paintings, wall decor, furniture) decay to 0 and are 100% rejected!
           if (diff > 13) {
             activityMap[pixelIdx] = 45;
-            if (y >= 12) {
-              diffSum += diff;
-              motionWeightedX += x;
-              motionWeightedY += y;
-              motionPoints++;
-            }
           } else if (activityMap[pixelIdx] > 0) {
             activityMap[pixelIdx]--;
           }
@@ -386,10 +387,69 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                                  (r - b >= 22) &&
                                  ((r - g) < 85);
 
-            // A pixel is ONLY candidate hand skin if it matches true human skin chromaticity
-            // AND is physically in the FOREGROUND (fgDiff > 16 OR actively moving in MHI)!
+            // A pixel is candidate skin if it matches chromaticity AND is in foreground/recent motion
             if (isChromaSkin && (fgDiff > 16 || activityMap[pixelIdx] > 0)) {
+              rawSkinMask[pixelIdx] = 1;
+            }
+          }
+        }
+
+        // --- PASS 2: Face & Head Zone Detection & Absolute Suppression ---
+        // Locate user's head/face cluster in the upper frame (y <= 48, x in [16, 112])
+        let faceSkinCount = 0;
+        let faceMinX = 128, faceMaxX = 0, faceMinY = 96, faceMaxY = 0;
+        for (let y = 0; y <= 48; y++) {
+          const rowOffset = y * 128;
+          for (let x = 16; x <= 112; x++) {
+            if (rawSkinMask[rowOffset + x] === 1) {
+              faceSkinCount++;
+              if (x < faceMinX) faceMinX = x;
+              if (x > faceMaxX) faceMaxX = x;
+              if (y < faceMinY) faceMinY = y;
+              if (y > faceMaxY) faceMaxY = y;
+            }
+          }
+        }
+
+        // A face is a large, wide cluster (>= 40px area, width >= 16px).
+        // If detected, create an exclusion safety bounding box that covers head, chin and neck!
+        if (faceSkinCount >= 40 && (faceMaxX - faceMinX) >= 16) {
+          const faceBoxMinX = Math.max(0, faceMinX - 5);
+          const faceBoxMaxX = Math.min(127, faceMaxX + 5);
+          const faceBoxMinY = Math.max(0, faceMinY - 4);
+          const faceBoxMaxY = Math.min(95, faceMaxY + 12); // Extends downward over chin/neck
+
+          for (let fy = faceBoxMinY; fy <= faceBoxMaxY; fy++) {
+            const rowOffset = fy * 128;
+            for (let fx = faceBoxMinX; fx <= faceBoxMaxX; fx++) {
+              isFaceZone[rowOffset + fx] = 1;
+            }
+          }
+        }
+
+        // --- PASS 3: Filtered Hand Skin Mask & Hand-Only Motion Extraction ---
+        for (let y = 0; y < 96; y++) {
+          const rowOffset = y * 128;
+          for (let x = 0; x < 128; x++) {
+            const pixelIdx = rowOffset + x;
+
+            // Only pixels OUTSIDE the face zone and below the upper hair line can be hand
+            if (rawSkinMask[pixelIdx] === 1 && isFaceZone[pixelIdx] === 0 && y >= 16) {
               skinMask[pixelIdx] = 1;
+            }
+
+            // Gated Hand Motion: ONLY moving hand skin pixels count toward motion & gestures!
+            // Head/face movements, clothing movements, background sway are 100% IGNORED!
+            const i = pixelIdx * 4;
+            const lumNow = (data[i] + data[i+1] + data[i+2]) / 3;
+            const lumPrev = (prevPixels[i] + prevPixels[i+1] + prevPixels[i+2]) / 3;
+            const diff = Math.abs(lumNow - lumPrev);
+
+            if (diff > 13 && skinMask[pixelIdx] === 1 && y >= 20) {
+              diffSum += diff;
+              motionWeightedX += x;
+              motionWeightedY += y;
+              motionPoints++;
             }
           }
         }
@@ -403,32 +463,34 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // =========================================================================================
-        // HAND REGION OF INTEREST (ROI) ISOLATION with HYSTERESIS (Anti-Jitter Stabilization)
+        // HAND REGION OF INTEREST (ROI) ISOLATION with ZERO-HEAD / ZERO-BODY GUARDS
         // =========================================================================================
-        // 1. Update Hand Anchor from active motion if present
-        if (motionPoints >= 8) {
+        // 1. Update Hand Anchor ONLY from confirmed hand skin motion points
+        if (motionPoints >= 6) {
           const motionX = motionWeightedX / motionPoints;
           const motionY = motionWeightedY / motionPoints;
 
-          const dist = Math.hypot(motionX - handAnchorRef.current.x, motionY - handAnchorRef.current.y);
-          if (dist > 32) {
+          // Never let hand anchor drift into the upper face zone (clamp y >= 26)
+          const clampedMotionY = Math.max(26, motionY);
+
+          const dist = Math.hypot(motionX - handAnchorRef.current.x, clampedMotionY - handAnchorRef.current.y);
+          if (dist > 30) {
             handAnchorRef.current.x = motionX;
-            handAnchorRef.current.y = motionY;
-          } else if (dist > 5) {
+            handAnchorRef.current.y = clampedMotionY;
+          } else if (dist > 4) {
             handAnchorRef.current.x += (motionX - handAnchorRef.current.x) * 0.40;
-            handAnchorRef.current.y += (motionY - handAnchorRef.current.y) * 0.40;
+            handAnchorRef.current.y += (clampedMotionY - handAnchorRef.current.y) * 0.40;
           }
         }
 
         // 2. Scan for hand skin pixels strictly around the hand anchor
-        // Clamped so y is NEVER in the upper head/hair zone (y >= 14 out of 96)
         const anchorX = Math.round(handAnchorRef.current.x);
         const anchorY = Math.round(handAnchorRef.current.y);
 
-        const roiMinX = Math.max(0, anchorX - 30);
-        const roiMaxX = Math.min(127, anchorX + 30);
-        const roiMinY = Math.max(14, anchorY - 34);
-        const roiMaxY = Math.min(95, anchorY + 34);
+        const roiMinX = Math.max(0, anchorX - 28);
+        const roiMaxX = Math.min(127, anchorX + 28);
+        const roiMinY = Math.max(18, anchorY - 32);
+        const roiMaxY = Math.min(95, anchorY + 32);
 
         let handSkinCount = 0;
         let handSumX = 0;
@@ -457,37 +519,71 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const handCx = handSumX / handSkinCount;
           const handCy = handSumY / handSkinCount;
 
-          // Hysteresis deadband for anchor center update: ignore micro-shifts < 5px
+          // Hysteresis deadband for anchor center update: ignore micro-shifts < 4px
           const anchorDrift = Math.hypot(handCx - handAnchorRef.current.x, handCy - handAnchorRef.current.y);
-          if (anchorDrift > 5) {
+          if (anchorDrift > 4) {
             handAnchorRef.current.x += (handCx - handAnchorRef.current.x) * 0.20;
-            handAnchorRef.current.y += (handCy - handAnchorRef.current.y) * 0.20;
+            handAnchorRef.current.y += (Math.max(26, handCy) - handAnchorRef.current.y) * 0.20;
           }
 
-          // 4. Morphological Fingertip Apex Width Verification:
-          // An outstretched index finger tip has width between 3px and 14px.
-          // Wide flat objects (paintings, furniture, posters) have width > 16px and are rejected!
-          let apexSliceMinX = 128, apexSliceMaxX = 0;
-          for (let y = handMinY; y <= Math.min(handMaxY, handMinY + 3); y++) {
+          // 3-TIER CYLINDRICAL FINGERTIP MORPHOLOGY VERIFICATION
+          // Rejects Heads, Foreheads, Shoulders, Body Torso, Wall Pictures
+          // Level 1: Apex Tip (rows handMinY .. handMinY + 2)
+          let l1MinX = 128, l1MaxX = 0;
+          for (let y = handMinY; y <= Math.min(handMaxY, handMinY + 2); y++) {
             const rowOffset = y * 128;
             for (let x = handMinX; x <= handMaxX; x++) {
               if (skinMask[rowOffset + x] === 1) {
-                if (x < apexSliceMinX) apexSliceMinX = x;
-                if (x > apexSliceMaxX) apexSliceMaxX = x;
+                if (x < l1MinX) l1MinX = x;
+                if (x > l1MaxX) l1MaxX = x;
               }
             }
           }
-          const apexWidth = apexSliceMaxX >= apexSliceMinX ? (apexSliceMaxX - apexSliceMinX + 1) : 0;
+          const w1 = l1MaxX >= l1MinX ? (l1MaxX - l1MinX + 1) : 0;
 
-          if (apexWidth > 0 && apexWidth <= 14) {
+          // Level 2: Finger Shaft (rows handMinY + 3 .. handMinY + 5)
+          let l2MinX = 128, l2MaxX = 0;
+          for (let y = Math.min(handMaxY, handMinY + 3); y <= Math.min(handMaxY, handMinY + 5); y++) {
+            const rowOffset = y * 128;
+            for (let x = handMinX; x <= handMaxX; x++) {
+              if (skinMask[rowOffset + x] === 1) {
+                if (x < l2MinX) l2MinX = x;
+                if (x > l2MaxX) l2MaxX = x;
+              }
+            }
+          }
+          const w2 = l2MaxX >= l2MinX ? (l2MaxX - l2MinX + 1) : 0;
+
+          // Level 3: Finger Base / Palm (rows handMinY + 6 .. handMinY + 9)
+          let l3MinX = 128, l3MaxX = 0;
+          for (let y = Math.min(handMaxY, handMinY + 6); y <= Math.min(handMaxY, handMinY + 9); y++) {
+            const rowOffset = y * 128;
+            for (let x = handMinX; x <= handMaxX; x++) {
+              if (skinMask[rowOffset + x] === 1) {
+                if (x < l3MinX) l3MinX = x;
+                if (x > l3MaxX) l3MaxX = x;
+              }
+            }
+          }
+          const w3 = l3MaxX >= l3MinX ? (l3MaxX - l3MinX + 1) : 0;
+
+          // Strict finger criteria:
+          // 1. Apex tip must be narrow (3px <= w1 <= 13px)
+          // 2. Shaft must be narrow cylinder (3px <= w2 <= 19px) - FOREHEAD / HEAD is >= 25px here!
+          // 3. Base must not balloon out immediately into a giant torso dome (w3 <= 28px)
+          const isValidFingertip = (w1 >= 3 && w1 <= 13) &&
+                                   (w2 >= 3 && w2 <= 19) &&
+                                   (w3 <= 28);
+
+          if (isValidFingertip) {
             let weightSum = 0;
             let weightedX = 0;
             let weightedY = 0;
-            const apexSliceLimit = Math.min(handMaxY, handMinY + 6);
+            const apexSliceLimit = Math.min(handMaxY, handMinY + 4);
 
             for (let y = handMinY; y <= apexSliceLimit; y++) {
               const rowDist = y - handMinY;
-              const rowWeight = (7 - rowDist) * (7 - rowDist); // 49, 36, 25, 16, 9, 4, 1
+              const rowWeight = (5 - rowDist) * (5 - rowDist); // 25, 16, 9, 4, 1
 
               const rowOffset = y * 128;
               for (let x = handMinX; x <= handMaxX; x++) {
@@ -510,11 +606,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           }
         }
 
-        // Fallback: If skin wasn't prominent in ROI, follow active motion cluster
-        if (rawTargetX === null && motionPoints >= 8) {
-          rawTargetX = (1 - (motionWeightedX / motionPoints) / 128) * 100;
-          rawTargetY = ((motionWeightedY / motionPoints) / 96) * 100;
-        }
+        // NOTE: Absolute Zero Head/Noise Fallback:
+        // If no confirmed finger is detected, rawTargetX remains null and cursor holds position.
 
         if (rawTargetX !== null && rawTargetY !== null) {
           const currentX = handPosRef.current.x;
@@ -735,6 +828,16 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearTimeout(waitingTimerRef.current);
       waitingTimerRef.current = null;
     }
+    if (catchCinematicTimerRef.current) {
+      clearTimeout(catchCinematicTimerRef.current);
+      catchCinematicTimerRef.current = null;
+    }
+    if (catchCinematicIntervalRef.current) {
+      clearInterval(catchCinematicIntervalRef.current);
+      catchCinematicIntervalRef.current = null;
+    }
+    setIsCatchCardRevealed(false);
+    setCatchCinematicProgress(0);
 
     sound.playCast();
     setStage('CASTING');
@@ -1071,12 +1174,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     triggerCatchSuccess();
   };
 
+  const revealCatchCard = () => {
+    if (catchCinematicTimerRef.current) {
+      clearTimeout(catchCinematicTimerRef.current);
+      catchCinematicTimerRef.current = null;
+    }
+    if (catchCinematicIntervalRef.current) {
+      clearInterval(catchCinematicIntervalRef.current);
+      catchCinematicIntervalRef.current = null;
+    }
+    setCatchCinematicProgress(100);
+    setIsCatchCardRevealed(true);
+
+    const isArcane = targetFish.rarity === 'ARCANE';
+    sound.playCatch(isArcane);
+
+    confetti({
+      particleCount: isArcane ? 180 : 80,
+      spread: 85,
+      origin: { y: 0.6 }
+    });
+  };
+
   // NO KEYBOARD REELING: Block keyboard during reeling and show prompt
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((stage === 'IDLE' || stage === 'CATCH_SUCCESS') && e.code === 'Space') {
+      if (stage === 'IDLE' && e.code === 'Space') {
         e.preventDefault();
         handleCast();
+      } else if (stage === 'CATCH_SUCCESS' && e.code === 'Space') {
+        e.preventDefault();
+        if (!isCatchCardRevealed) {
+          revealCatchCard();
+        } else {
+          handleCast();
+        }
       } else if (stage === 'WAITING' && e.code === 'Space') {
         e.preventDefault();
         triggerEarlyFoul();
@@ -1138,9 +1270,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearInterval(landingIntervalRef.current);
       landingIntervalRef.current = null;
     }
-
-    const isArcane = targetFish.rarity === 'ARCANE';
-    sound.playCatch(isArcane);
     const isShiny = Math.random() < 0.10; // Exactly 10% Shiny chance!
     const weight = +(targetFish.weightMin + Math.random() * (targetFish.weightMax - targetFish.weightMin)).toFixed(1);
     const baseCalculatedPrice = Math.round(targetFish.basePrice * (weight / targetFish.weightMin));
@@ -1182,13 +1311,31 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     consecutiveFailsRef.current = 0;
     setConsecutiveFails(0);
 
+    // 1. Enter CATCH_SUCCESS in cinematic animation mode (card NOT yet revealed)
+    setIsCatchCardRevealed(false);
+    setCatchCinematicProgress(0);
     setStage('CATCH_SUCCESS');
 
-    confetti({
-      particleCount: isArcane ? 180 : 70,
-      spread: 80,
-      origin: { y: 0.6 }
-    });
+    // Audio: water splash & reel click
+    sound.playSplash();
+    sound.playReelClick();
+
+    // 2. Play cinematic hauling sequence over 2.6 seconds
+    if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
+    if (catchCinematicIntervalRef.current) clearInterval(catchCinematicIntervalRef.current);
+
+    const startTime = Date.now();
+    const duration = 2600; // 2.6 seconds animation
+
+    catchCinematicIntervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(100, Math.round((elapsed / duration) * 100));
+      setCatchCinematicProgress(progress);
+    }, 40);
+
+    catchCinematicTimerRef.current = setTimeout(() => {
+      revealCatchCard();
+    }, duration);
   };
 
   const triggerLost = (reason?: string) => {
@@ -1829,9 +1976,66 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* CATCH SUCCESS Showcase Modal (REVEAL ONLY AFTER CATCH!) */}
-        {stage === 'CATCH_SUCCESS' && lastCaught && (
-          <div className="pointer-events-auto p-5 sm:p-6 bg-[#08150f]/95 border-2 border-emerald-400 shadow-[0_0_50px_rgba(16,185,129,0.5)] text-center max-w-md w-full space-y-4 pixel-corners animate-in zoom-in-95 duration-200">
+        {/* CATCH CINEMATIC SEQUENCE (Watch the fish jump / emerge before card appears!) */}
+        {stage === 'CATCH_SUCCESS' && lastCaught && !isCatchCardRevealed && (
+          <div className="absolute inset-0 z-30 pointer-events-auto flex flex-col justify-between p-4 sm:p-8 bg-gradient-to-b from-black/85 via-black/25 to-black/90 animate-in fade-in duration-300">
+            {/* Top Cinematic Trophy Alert Bar */}
+            <div className="flex flex-col items-center gap-2 pt-2 sm:pt-4 text-center">
+              <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 bg-black/90 border border-emerald-400 font-arcade text-[10px] sm:text-xs text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.5)] animate-pulse">
+                <Sparkles className="w-4 h-4 text-yellow-300" />
+                <span>{language === 'ru' ? '⚡ ТРОФЕЙ НА КРЮЧКЕ! ВЫВАЖИВАНИЕ... ⚡' : '⚡ TROPHY HOOKED! REELING IN... ⚡'}</span>
+              </div>
+              <h2 className="font-arcade text-xl sm:text-3xl text-white tracking-widest filter drop-shadow-[0_0_15px_rgba(52,211,153,0.9)] animate-pulse">
+                {getFishName(lastCaught.fish, language)}
+              </h2>
+              <div className="text-[10px] sm:text-xs font-mono text-cyan-300 tracking-widest uppercase bg-black/70 px-3 py-0.5 border border-cyan-500/40">
+                {language === 'ru' ? 'ОКЕАНСКИЙ ТРОФЕЙ ВЫПРЫГИВАЕТ НА ПОВЕРХНОСТЬ' : 'SURFACING THROUGH OCEAN SWELLS'}
+              </div>
+            </div>
+
+            {/* Center Dynamic Splash Ring Shockwave */}
+            <div className="flex-1 flex items-center justify-center relative pointer-events-none">
+              <div className="relative flex items-center justify-center">
+                <div className="w-48 h-48 sm:w-72 sm:h-72 rounded-full border-2 border-emerald-400/30 animate-ping absolute" />
+                <div className="w-36 h-36 sm:w-56 sm:h-56 rounded-full border border-cyan-400/50 animate-pulse absolute shadow-[0_0_35px_rgba(34,211,238,0.4)]" />
+                <div className="p-4 sm:p-5 bg-black/75 border-2 border-emerald-400/80 rounded-full backdrop-blur-md shadow-[0_0_30px_rgba(16,185,129,0.7)]">
+                  <span className="text-4xl sm:text-6xl filter drop-shadow-[0_0_15px_#10b981] select-none">🎣</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Cinematic Haul Progress Bar & Skip Button */}
+            <div className="max-w-md w-full mx-auto space-y-3 pb-2 sm:pb-4">
+              <div className="space-y-1.5 bg-black/90 p-3 sm:p-4 border-2 border-emerald-500/70 backdrop-blur-md shadow-[0_0_25px_rgba(16,185,129,0.35)]">
+                <div className="flex justify-between font-arcade text-[10px] sm:text-xs">
+                  <span className="text-emerald-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span>{language === 'ru' ? 'ПОДЪЕМ ДОБЫЧИ НА БОРТ:' : 'HAULING TROPHY ONTO DECK:'}</span>
+                  </span>
+                  <span className="text-amber-300 font-bold font-mono">{Math.round(catchCinematicProgress)}%</span>
+                </div>
+                <div className="w-full h-3 sm:h-4 bg-zinc-950 border border-emerald-400/60 p-0.5 overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 shadow-[0_0_14px_#34d399] transition-all duration-75"
+                    style={{ width: `${Math.min(100, Math.max(0, catchCinematicProgress))}%` }}
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={revealCatchCard}
+                className="w-full py-2.5 sm:py-3 bg-zinc-900/95 hover:bg-emerald-950/80 text-zinc-200 hover:text-emerald-300 font-arcade text-xs border border-zinc-600 hover:border-emerald-400 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-98"
+              >
+                <span>[ {language === 'ru' ? 'ПРОПУСТИТЬ АНИМАЦИЮ (ПРОБЕЛ)' : 'SKIP ANIMATION (SPACE)'} ]</span>
+                <ChevronRight className="w-4 h-4 text-emerald-400" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CATCH SUCCESS Showcase Modal (REVEAL ONLY AFTER CATCH ANIMATION!) */}
+        {stage === 'CATCH_SUCCESS' && lastCaught && isCatchCardRevealed && (
+          <div className="pointer-events-auto p-5 sm:p-6 bg-[#08150f]/95 border-2 border-emerald-400 shadow-[0_0_50px_rgba(16,185,129,0.5)] text-center max-w-md w-full space-y-4 pixel-corners animate-in zoom-in-95 duration-300">
             
             <div className="font-arcade text-xs text-amber-400 tracking-wider flex items-center justify-center gap-2">
               <Sparkles className="w-3.5 h-3.5" />
