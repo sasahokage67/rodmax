@@ -357,45 +357,47 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
           const pixelIdx = i / 4;
 
-          // 1. Running Background Subtraction (Foreground vs Background Wall/Painting)
-          const bgR = bg[i];
-          const bgG = bg[i+1];
-          const bgB = bg[i+2];
-          const fgDiff = (Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB)) / 3;
-
-          // Background adapts ONLY to stationary pixels (learning rate ~0.02)
-          if (diff <= 8) {
-            bg[i] += (r - bgR) * 0.02;
-            bg[i+1] += (g - bgG) * 0.02;
-            bg[i+2] += (b - bgB) * 0.02;
-          }
-
-          // 2. Motion History Image (MHI): Tracks recent activity for 45 ticks (~1.5s)
-          if (diff > 13) {
-            activityMap[pixelIdx] = 45;
-          } else if (activityMap[pixelIdx] > 0) {
-            activityMap[pixelIdx]--;
-          }
-
-          // 3. Strict Human Skin Chromaticity Filter in Normalized (r, g) Space
+          // 1. Strict Human Skin Chromaticity Filter in Normalized (r, g) Space
           // Rejects wood frames, brown paint, yellow light, beige wallpaper, and posters
+          let isChromaSkin = false;
           const sum = r + g + b;
           if (sum > 90 && sum < 680) {
             const normR = r / sum;
             const normG = g / sum;
 
-            const isChromaSkin = (normR >= 0.36 && normR <= 0.58) &&
-                                 (normG >= 0.25 && normG <= 0.38) &&
-                                 (normR > normG) &&
-                                 (r > g && g > b) &&
-                                 (r - g >= 12) &&
-                                 (r - b >= 22) &&
-                                 ((r - g) < 85);
+            isChromaSkin = (normR >= 0.36 && normR <= 0.58) &&
+                           (normG >= 0.25 && normG <= 0.38) &&
+                           (normR > normG) &&
+                           (r > g && g > b) &&
+                           (r - g >= 12) &&
+                           (r - b >= 22) &&
+                           ((r - g) < 85);
+          }
 
-            // A pixel is candidate skin if it matches chromaticity AND is in foreground/recent motion
-            if (isChromaSkin && (fgDiff > 16 || activityMap[pixelIdx] > 0)) {
-              rawSkinMask[pixelIdx] = 1;
-            }
+          // 2. Running Background Subtraction (Foreground vs Background Wall/Painting)
+          const bgR = bg[i];
+          const bgG = bg[i+1];
+          const bgB = bg[i+2];
+          const fgDiff = (Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB)) / 3;
+
+          // Background adapts ONLY to stationary NON-SKIN pixels (wall/posters)
+          // NEVER absorbs skin pixels into the background model so hand never fades out!
+          if (diff <= 6 && !isChromaSkin) {
+            bg[i] += (r - bgR) * 0.025;
+            bg[i+1] += (g - bgG) * 0.025;
+            bg[i+2] += (b - bgB) * 0.025;
+          }
+
+          // 3. Motion History Image (MHI): Tracks recent activity for 45 ticks (~1.5s)
+          if (diff > 12) {
+            activityMap[pixelIdx] = 45;
+          } else if (activityMap[pixelIdx] > 0) {
+            activityMap[pixelIdx]--;
+          }
+
+          // A pixel is candidate skin if it matches chromaticity AND is foreground (or recent motion)
+          if (isChromaSkin && (fgDiff > 12 || activityMap[pixelIdx] > 0 || diff > 6)) {
+            rawSkinMask[pixelIdx] = 1;
           }
         }
 
@@ -494,120 +496,36 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let rawTargetY: number | null = null;
 
         // 2. Only proceed if there is a real hand presence
-        if (handSkinCount >= 15) {
-          const handCentroidY = handSumY / handSkinCount;
-          // STRICT RULE: The extended index finger is the uppermost extremity. It is ALWAYS strictly above the hand centroid!
-          // We forbid searching for a fingertip at or below the centroid or near the bottom boundary (y >= 72),
-          // which permanently prevents the cursor from dropping to the wrist, forearm, or lower arm ("то что ниже")!
-          const maxApexSearchY = Math.min(Math.floor(handCentroidY - 1), 72);
+        if (handSkinCount >= 10) {
+          // The true fingertip apex is strictly the topmost row of the hand cluster: handMinY
+          const tipY = handMinY;
 
-          let fingerApexY = -1;
-          let fingerApexX = -1;
+          // Find the exact horizontal subpixel center of the fingertip at handMinY (and handMinY + 1)
+          let tipSumX = 0;
+          let tipPixels = 0;
+          const maxRow = Math.min(handMinY + 1, handMaxY);
 
-          // 3. Scan row-by-row strictly from handMinY down to maxApexSearchY
-          // Find the topmost narrow protrusion (the extended index finger)
-          for (let y = handMinY; y <= maxApexSearchY; y++) {
+          for (let y = handMinY; y <= maxRow; y++) {
             const rowOffset = y * 128;
-            
-            // Scan for contiguous skin runs in this row within the hand horizontal bounds
-            let inRun = false;
-            let runStart = 0;
-            let bestRunWidth = 999;
-            let bestRunCenter = -1;
-
-            for (let x = handMinX; x <= handMaxX + 1; x++) {
-              const isSkin = x <= handMaxX && skinMask[rowOffset + x] === 1;
-              if (isSkin && !inRun) {
-                inRun = true;
-                runStart = x;
-              } else if (!isSkin && inRun) {
-                inRun = false;
-                const runWidth = x - runStart;
-                // An outstretched index finger has a narrow span (2 to 14 pixels)
-                if (runWidth >= 2 && runWidth <= 14) {
-                  if (runWidth < bestRunWidth) {
-                    bestRunWidth = runWidth;
-                    bestRunCenter = Math.round(runStart + runWidth / 2);
-                  }
-                }
-              }
-            }
-
-            if (bestRunCenter !== -1) {
-              // Verify vertical finger shaft continuity: must connect downwards for at least 3-4 rows
-              let shaftPixels = 0;
-              const checkLimit = Math.min(y + 5, handMaxY);
-              for (let sy = y; sy <= checkLimit; sy++) {
-                const sOffset = sy * 128;
-                for (let sx = bestRunCenter - 5; sx <= bestRunCenter + 5; sx++) {
-                  if (sx >= 0 && sx < 128 && skinMask[sOffset + sx] === 1) {
-                    shaftPixels++;
-                  }
-                }
-              }
-
-              if (shaftPixels >= 4) {
-                fingerApexY = y;
-                fingerApexX = bestRunCenter;
-                break; // Found the true highest finger apex!
-              }
-            }
-          }
-
-          // Fallback if finger is slightly angled: use the topmost skin point of the hand
-          if (fingerApexY === -1 && handMinY <= maxApexSearchY) {
-            fingerApexY = handMinY;
-            const rowOffset = handMinY * 128;
-            let rowSumX = 0, rowCount = 0;
             for (let x = handMinX; x <= handMaxX; x++) {
               if (skinMask[rowOffset + x] === 1) {
-                rowSumX += x;
-                rowCount++;
+                tipSumX += x;
+                tipPixels++;
               }
-            }
-            if (rowCount > 0) {
-              fingerApexX = Math.round(rowSumX / rowCount);
             }
           }
 
-          // 4. Calculate subpixel position weighted squarely on the fingertip apex
-          if (fingerApexY !== -1 && fingerApexX !== -1) {
-            let weightedX = 0;
-            let weightedY = 0;
-            let weightSum = 0;
+          if (tipPixels > 0) {
+            const tipX = tipSumX / tipPixels;
 
-            const tipLimit = Math.min(fingerApexY + 4, handMaxY);
-            for (let y = fingerApexY; y <= tipLimit; y++) {
-              const rowOffset = y * 128;
-              for (let x = fingerApexX - 6; x <= fingerApexX + 6; x++) {
-                if (x >= 0 && x < 128 && skinMask[rowOffset + x] === 1) {
-                  // Apex weight: top row gets weight 25, then 16, 9, 4, 1
-                  const dist = y - fingerApexY;
-                  const w = (5 - dist) * (5 - dist);
-                  weightedX += x * w;
-                  weightedY += y * w;
-                  weightSum += w;
-                }
-              }
-            }
+            // Mirrored X for natural mirror orientation
+            rawTargetX = (1 - tipX / 128) * 100;
+            rawTargetY = (tipY / 96) * 100;
 
-            if (weightSum > 0) {
-              const subpixelX = weightedX / weightSum;
-              const subpixelY = weightedY / weightSum;
-
-              // Mirrored X for natural user orientation (like looking in a mirror)
-              rawTargetX = (1 - subpixelX / 128) * 100;
-              rawTargetY = (subpixelY / 96) * 100;
-
-              // Lock hand anchor directly to the index fingertip!
-              handAnchorRef.current.x = subpixelX;
-              handAnchorRef.current.y = subpixelY;
-            }
+            handAnchorRef.current.x = tipX;
+            handAnchorRef.current.y = tipY;
           }
         }
-
-        // NOTE: Absolute Zero Fallback to Palm or Head:
-        // If no confirmed finger apex is detected, rawTargetX remains null and cursor holds position stably.
 
         if (rawTargetX !== null && rawTargetY !== null) {
           const currentX = handPosRef.current.x;
@@ -617,35 +535,23 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const dy = rawTargetY - currentY;
           const distance = Math.hypot(dx, dy);
 
-          // 1. Outlier spike suppressor: clamp extreme teleport sensor glitch (> 60%)
-          let clampedTargetX = rawTargetX;
-          let clampedTargetY = rawTargetY;
-          if (distance > 60) {
-            const scale = 60 / distance;
-            clampedTargetX = currentX + dx * scale;
-            clampedTargetY = currentY + dy * scale;
-          }
-
-          // 2. Zero-Lag 60 FPS Velocity-Adaptive Responsive Filter:
-          // - Active tracking (> 1.5%): alpha = 0.94 -> instant 60 FPS response, ZERO input lag!
-          // - Fine steering (0.20% - 1.5%): alpha = 0.72 -> razor-sharp with subtle stability
-          // - Deadband (< 0.20%): alpha = 0.08 -> freezes camera sensor noise when holding still
-          let alpha = 0.72;
-          if (distance < 0.20) {
-            alpha = 0.08;
-          } else if (distance > 1.5) {
-            alpha = 0.94;
+          // Fast 60 FPS responsive filter with ZERO lag:
+          // Low latency: 0.70 for micro-adjustments, up to 0.96 for fast movements
+          let alpha = 0.75;
+          if (distance <= 0.3) {
+            alpha = 0.50; // Jitter suppression when resting
+          } else if (distance > 2.0) {
+            alpha = 0.96; // Instant 1:1 snap on movement
           } else {
-            const t = (distance - 0.20) / (1.5 - 0.20);
-            alpha = 0.08 + t * (0.94 - 0.08);
+            alpha = 0.50 + ((distance - 0.3) / 1.7) * 0.46;
           }
 
-          handPosRef.current.x += (clampedTargetX - currentX) * alpha;
-          handPosRef.current.y += (clampedTargetY - currentY) * alpha;
+          handPosRef.current.x += dx * alpha;
+          handPosRef.current.y += dy * alpha;
 
-          // Clamped strictly within arena boundaries so it never escapes the visible arena
-          handPosRef.current.x = Math.max(4, Math.min(96, handPosRef.current.x));
-          handPosRef.current.y = Math.max(5, Math.min(95, handPosRef.current.y));
+          // Clamped strictly within arena boundaries
+          handPosRef.current.x = Math.max(3, Math.min(97, handPosRef.current.x));
+          handPosRef.current.y = Math.max(3, Math.min(97, handPosRef.current.y));
 
           // Direct DOM updates: ZERO React re-renders!
           const posX = handPosRef.current.x.toFixed(1);
@@ -933,7 +839,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }, 100);
   };
 
-  // Strike Handler
+  // Strike Handler: Immediately launches the high quality catch video upon successful hook!
   const handleStrike = () => {
     if (stageRef.current !== 'BITE') return;
     if (biteIntervalRef.current) {
@@ -950,26 +856,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     isRoundFinishedRef.current = false;
     hasAwardedRef.current = false;
 
-    // Reset positions to center
-    fishPosRef.current = { x: 50, y: 50 };
-    fishTargetRef.current = { x: 50, y: 50 };
-    fishTimerRef.current = 0;
-
-    // Dynamic starting progress by rarity tier
-    const startProgress = getInitialProgress(targetFish.rarity);
-    currentProgressRef.current = startProgress;
-    setCatchProgress(startProgress);
-
-    // Reset cumulative off-target timer (2.5s tolerance)
-    cumulativeOffTargetMsRef.current = 0;
-    setOffTargetMs(0);
-    lastTickTimeRef.current = Date.now();
-
-    setFishPos({ x: 50, y: 50 });
-    setIsLockedOn(false);
-    setControlWarning(null);
-    setStage('REELING');
-    stageRef.current = 'REELING';
+    // Immediately launch the full-screen catch video!
+    triggerCatchSuccess();
   };
 
   // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion & 1.5s Cumulative Snap!
@@ -1890,9 +1778,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                     <Crosshair className={`w-full h-full stroke-[1] ${isLockedOn ? 'text-emerald-300' : 'text-amber-400'}`} />
                   </div>
 
-                  {/* Swimming Fish Icon */}
-                  <div className="text-xl sm:text-2xl filter drop-shadow-[0_2px_8px_black] animate-wiggle select-none">
-                    🐟
+                  {/* Sonar Beacon Target */}
+                  <div className="w-4 h-4 rounded-full bg-cyan-400/80 border border-white shadow-[0_0_12px_#22d3ee] flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
                   </div>
 
                   {/* Target Label */}
