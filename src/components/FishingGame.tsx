@@ -41,6 +41,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const { language, t } = useLanguage();
   const [stage, setStage] = useState<GameStage>('IDLE');
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
+  const targetFishRef = useRef<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
   const [isCatchCardRevealed, setIsCatchCardRevealed] = useState(false);
   const [catchCinematicProgress, setCatchCinematicProgress] = useState(0);
@@ -815,6 +816,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       navigator.vibrate([120, 60, 120]);
     }
     const rolled = rollFish();
+    targetFishRef.current = rolled;
     setTargetFish(rolled);
     setStage('BITE');
 
@@ -1086,11 +1088,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         progressTextRef.current.className = rounded > 30 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold';
       }
 
-      // 7. CATCH LANDING (1.0s acceptance window) OR ZERO-PROGRESS LOST TRIGGER
+      // 7. CATCH SUCCESS: Reaching 100% progress immediately secures the catch!
       if (currentProgressRef.current >= 100) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
-        triggerLandingPhase();
+        triggerCatchSuccess();
       } else if (currentProgressRef.current <= 0) {
         isRoundFinishedRef.current = true;
         clearInterval(loop);
@@ -1103,39 +1105,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     return () => clearInterval(loop);
   }, [stage, targetFish, diffParams]);
 
-  // 1.0-Second Landing Acceptance Window (User Requirement: must accept within 1s or lose fish!)
+  // Direct Catch Handlers (Smoothly awards the catch directly)
   const triggerLandingPhase = () => {
-    sound.playReelClick();
-    setStage('LANDING');
-    setLandingTimeLeft(1.0);
-
-    const deadline = Date.now() + 1000;
-    if (landingIntervalRef.current) clearInterval(landingIntervalRef.current);
-
-    landingIntervalRef.current = setInterval(() => {
-      const remaining = Math.max(0, (deadline - Date.now()) / 1000);
-      setLandingTimeLeft(Math.round(remaining * 100) / 100);
-
-      if (remaining <= 0) {
-        if (landingIntervalRef.current) {
-          clearInterval(landingIntervalRef.current);
-          landingIntervalRef.current = null;
-        }
-        if (!hasAwardedRef.current) {
-          isRoundFinishedRef.current = true;
-          sound.playSnap();
-          triggerLost('ВЫ НЕ УСПЕЛИ ПРИНЯТЬ РЫБУ ЗА 1 СЕКУНДУ! Добыча выскользнула из рук в океан!');
-        }
-      }
-    }, 20);
+    triggerCatchSuccess();
   };
 
   const handleAcceptCatch = () => {
-    if (stage !== 'LANDING' || hasAwardedRef.current) return;
-    if (landingIntervalRef.current) {
-      clearInterval(landingIntervalRef.current);
-      landingIntervalRef.current = null;
-    }
     triggerCatchSuccess();
   };
 
@@ -1151,7 +1126,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setCatchCinematicProgress(100);
     setIsCatchCardRevealed(true);
 
-    const isArcane = targetFish.rarity === 'ARCANE';
+    const currentFish = targetFishRef.current || targetFish;
+    const isArcane = currentFish.rarity === 'ARCANE';
     sound.playCatch(isArcane);
 
     confetti({
@@ -1222,6 +1198,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const triggerCatchSuccess = () => {
     if (hasAwardedRef.current) return;
     hasAwardedRef.current = true;
+    isRoundFinishedRef.current = true;
 
     if (biteIntervalRef.current) {
       clearInterval(biteIntervalRef.current);
@@ -1235,9 +1212,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearInterval(landingIntervalRef.current);
       landingIntervalRef.current = null;
     }
+
+    const currentFish = targetFishRef.current || targetFish;
     const isShiny = Math.random() < 0.10; // Exactly 10% Shiny chance!
-    const weight = +(targetFish.weightMin + Math.random() * (targetFish.weightMax - targetFish.weightMin)).toFixed(1);
-    const baseCalculatedPrice = Math.round(targetFish.basePrice * (weight / targetFish.weightMin));
+    const weight = +(currentFish.weightMin + Math.random() * (currentFish.weightMax - currentFish.weightMin)).toFixed(1);
+    const baseCalculatedPrice = Math.round(currentFish.basePrice * (weight / currentFish.weightMin));
     const price = isShiny ? baseCalculatedPrice * 2 : baseCalculatedPrice;
 
     const baseExpMap: Record<string, number> = {
@@ -1251,14 +1230,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       ARCANE: 4500
     };
     const rawExp = Math.round(
-      (baseExpMap[targetFish.rarity] || 40) * 
-      (1 + ((weight - targetFish.weightMin) / (targetFish.weightMax - targetFish.weightMin || 1)) * 0.5)
+      (baseExpMap[currentFish.rarity] || 40) * 
+      (1 + ((weight - currentFish.weightMin) / (currentFish.weightMax - currentFish.weightMin || 1)) * 0.5)
     );
     const expEarned = isShiny ? Math.round(rawExp * 1.5) : rawExp;
 
     const caughtRecord: CaughtFish = {
       id: `caught_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      fish: targetFish,
+      fish: currentFish,
       weight,
       price,
       caughtAt: new Date().toLocaleTimeString(),
@@ -1304,6 +1283,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   };
 
   const triggerLost = (reason?: string) => {
+    // Guard: Never allow lost sequence to overwrite a successful catch!
+    if (hasAwardedRef.current || stage === 'CATCH_SUCCESS') return;
     isRoundFinishedRef.current = true;
     consecutiveFailsRef.current += 1;
     setConsecutiveFails(consecutiveFailsRef.current);

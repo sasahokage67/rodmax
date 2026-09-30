@@ -231,8 +231,8 @@ export const TRANSLATIONS = {
     'landing.step2Desc': 'При появлении надписи «КЛЮЕТ!» резко подвиньте палец в камеру (окно реакции 1.1 сек).',
     'landing.step3Title': '3. ОПТИЧЕСКОЕ ВЫВАЖИВАНИЕ',
     'landing.step3Desc': 'Ведите указательным пальцем точно за рыбой. Следите за прицелом ☝️ в видоискателе.',
-    'landing.step4Title': '4. ПРИНЯТИЕ ДОБЫЧИ',
-    'landing.step4Desc': 'Когда шкала заполнится до 100%, подтвердите улов за 1.0 сек жестом или кликом.',
+    'landing.step4Title': '4. ПОБЕДА И ТРОФЕЙ',
+    'landing.step4Desc': 'Когда шкала заполнится до 100%, рыба поймана! Смотрите анимацию подъема добычи и забирайте трофей.',
 
     // Guide Modal
     'guide.title': 'РУКОВОДСТВО: ОПТИЧЕСКОЕ УПРАВЛЕНИЕ ЖЕСТАМИ В RODMAX',
@@ -245,8 +245,8 @@ export const TRANSLATIONS = {
     'guide.step3Text': 'Как только зазвучит зуммер и появится «КЛЮЕТ!», сделайте резкое движение пальцем в камеру.',
     'guide.step4Header': 'ШАГ 4: ВЫВАЖИВАНИЕ (ТРЕКИНГ ПАЛЬЦА)',
     'guide.step4Text': 'Держите кончик указательного пальца на рыбе. Если палец сойдет с рыбы более чем на 2.5 сек суммарно — леска оборвется.',
-    'guide.step5Header': 'ШАГ 5: ПРИЕМ УЛОВА (ОКНО 1.0 СЕК)',
-    'guide.step5Text': 'При достижении 100% шкалы сделайте жест или кликните за 1.0 секунду, чтобы вытащить рыбу из воды.',
+    'guide.step5Header': 'ШАГ 5: ТРОФЕЙ И НАГРАДЫ',
+    'guide.step5Text': 'При достижении 100% шкалы рыба гарантированно поймана. Любуйтесь кинематографичным подъемом улова и получайте монеты и опыт в садок!',
     'guide.close': 'ПОНЯТНО, В БОЙ!',
 
     // Fishing Game
@@ -289,7 +289,7 @@ export const TRANSLATIONS = {
     'fishing.hudStrike': '[ПОДСЕЧКА] Резко подвиньте палец в камеру (окно 1.1 сек)',
     'fishing.hudFoul': '[ОШИБКА] Рывок раньше поклевки = фальстарт (штраф 2 сек)',
     'fishing.hudReel': '[ВЫВАЖИВАНИЕ] Держите указательный палец на рыбе (срыв при потере 2.5с)',
-    'fishing.hudAccept': '[ПРИЕМ] Быстро подтвердите улов (окно ровно 1.0 сек, иначе срыв!)',
+    'fishing.hudAccept': '[ТРОФЕЙ] При 100% шкалы добыча гарантированно поймана и вываживается на борт!',
     'fishing.tension': 'НАТЯЖЕНИЕ ЛЕСКИ',
     'fishing.tensionLow': 'ОБРЫВ ПРИ 0%',
     'fishing.tensionHigh': 'ПОТЕРЯ ПРИ 2.5с',
@@ -451,8 +451,8 @@ export const TRANSLATIONS = {
     'landing.step2Desc': 'When «FISH ON!» flashes, rapidly thrust your fingertip forward (1.1s reaction window).',
     'landing.step3Title': '3. PRECISION REELING',
     'landing.step3Desc': 'Steer your index finger over the moving fish. Track the reticle ☝️ in your viewfinder.',
-    'landing.step4Title': '4. ACCEPT CATCH',
-    'landing.step4Desc': 'When the bar reaches 100%, confirm your catch within 1.0s via gesture or mouse click.',
+    'landing.step4Title': '4. VICTORY & TROPHY',
+    'landing.step4Desc': 'When the bar reaches 100%, the fish is caught! Watch the hauling animation and claim your trophy.',
 
     // Guide Modal
     'guide.title': 'MANUAL: OPTICAL GESTURE CONTROL IN RODMAX',
@@ -465,8 +465,8 @@ export const TRANSLATIONS = {
     'guide.step3Text': 'As soon as the buzzer rings and «FISH ON!» appears, rapidly thrust your finger toward the camera.',
     'guide.step4Header': 'STEP 4: REELING (FINGERTIP TRACKING)',
     'guide.step4Text': 'Keep your index fingertip centered over the swimming fish. Off-target for >2.5s cumulative will snap the line.',
-    'guide.step5Header': 'STEP 5: LANDING (1.0s WINDOW)',
-    'guide.step5Text': 'Once progress reaches 100%, twitch your hand or click within 1.0s to haul the trophy onto the deck.',
+    'guide.step5Header': 'STEP 5: TROPHY & REWARDS',
+    'guide.step5Text': 'Reaching 100% progress secures the catch. Enjoy the haul animation and receive coins and EXP in your basket!',
     'guide.close': 'GOT IT, LET\'S FISH!',
 
     // Fishing Game
@@ -509,7 +509,7 @@ export const TRANSLATIONS = {
     'fishing.hudStrike': '[STRIKE] Rapid finger thrust towards camera (1.1s window)',
     'fishing.hudFoul': '[PENALTY] Motion before bite = false start (2s freeze)',
     'fishing.hudReel': '[REELING] Guide index finger over swimming fish (snap if lost 2.5s)',
-    'fishing.hudAccept': '[LANDING] Rapidly confirm catch (strictly 1.0s window!)',
+    'fishing.hudAccept': '[TROPHY] At 100% progress the fish is caught and hauled aboard!',
     'fishing.tension': 'LINE TENSION',
     'fishing.tensionLow': 'SNAP AT 0%',
     'fishing.tensionHigh': 'LOSS AT 2.5s',
