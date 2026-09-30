@@ -669,21 +669,21 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // 1. FAULT TRIGGER: Early twitch in WAITING stage scares fish
-        if (stage === 'WAITING' && avgMotion > 16) {
+        if (stageRef.current === 'WAITING' && avgMotion > 16) {
           triggerEarlyFoul();
         }
         // 2. STRIKE: Ultra-low latency strike trigger in BITE stage
-        else if (stage === 'BITE' && avgMotion > 12) {
+        else if (stageRef.current === 'BITE' && avgMotion > 12) {
           handleStrike();
         }
         // 3. LANDING: Quick gesture in LANDING stage
-        else if (stage === 'LANDING' && avgMotion > 16) {
+        else if (stageRef.current === 'LANDING' && avgMotion > 16) {
           handleAcceptCatch();
         }
 
         // LOW-THRESHOLD THUMBS UP (👍) GESTURE DETECTOR
         // Runs in IDLE, CATCH_SUCCESS, LOST using isolated hand cluster
-        if (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST') {
+        if (stageRef.current === 'IDLE' || stageRef.current === 'CATCH_SUCCESS' || stageRef.current === 'LOST') {
           let isThumbsUpCandidate = false;
           let isWrongGestureCandidate = false;
 
@@ -749,7 +749,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           setIsWrongGesture(wrongGestureActive);
 
           const now = Date.now();
-          const isEligibleToCast = stage === 'IDLE' && (now - idleEnterTimeRef.current >= 1200);
+          const isEligibleToCast = stageRef.current === 'IDLE' && (now - idleEnterTimeRef.current >= 1200);
 
           if (isEligibleToCast) {
             if (thumbsUpActive) {
@@ -788,7 +788,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Cast Handler (Triggered exclusively by mouse click / hotkey)
   const handleCast = () => {
-    if (stage !== 'IDLE' && stage !== 'CATCH_SUCCESS' && stage !== 'LOST') return;
+    if (stageRef.current !== 'IDLE' && stageRef.current !== 'CATCH_SUCCESS' && stageRef.current !== 'LOST') return;
 
     const now = Date.now();
     if (now - lastCastTimeRef.current < 400) return;
@@ -954,7 +954,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Strike Handler: Enters the Reeling Phase where player holds their finger on the moving target area!
   const handleStrike = () => {
-    if (stageRef.current !== 'BITE') return;
+    if (stageRef.current !== 'BITE' || isRoundFinishedRef.current) return;
     if (biteIntervalRef.current) {
       clearInterval(biteIntervalRef.current);
       biteIntervalRef.current = null;
@@ -1211,24 +1211,24 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // NO KEYBOARD REELING: Block keyboard during reeling and show prompt
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (stage === 'IDLE' && e.code === 'Space') {
+      if (stageRef.current === 'IDLE' && e.code === 'Space') {
         e.preventDefault();
         handleCast();
-      } else if (stage === 'CATCH_SUCCESS' && e.code === 'Space') {
+      } else if (stageRef.current === 'CATCH_SUCCESS' && e.code === 'Space') {
         e.preventDefault();
         if (isCatchCardRevealed) {
           handleCast();
         }
-      } else if (stage === 'WAITING' && e.code === 'Space') {
+      } else if (stageRef.current === 'WAITING' && e.code === 'Space') {
         e.preventDefault();
         triggerEarlyFoul();
-      } else if (stage === 'BITE' && e.code === 'Space') {
+      } else if (stageRef.current === 'BITE' && e.code === 'Space') {
         e.preventDefault();
         handleStrike();
-      } else if (stage === 'LANDING' && (e.code === 'Space' || e.code === 'Enter')) {
+      } else if (stageRef.current === 'LANDING' && (e.code === 'Space' || e.code === 'Enter')) {
         e.preventDefault();
         handleAcceptCatch();
-      } else if (stage === 'REELING') {
+      } else if (stageRef.current === 'REELING') {
         // Remind player that reeling is physical (pointing finger in camera)
         if (['Space', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
           e.preventDefault();
@@ -1244,22 +1244,22 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Pointer Handlers: ONLY allow touch/pen for screen drag
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (stage === 'CATCH_SUCCESS') {
+    if (stageRef.current === 'CATCH_SUCCESS') {
       return;
     }
-    if (stage === 'WAITING') {
+    if (stageRef.current === 'WAITING') {
       triggerEarlyFoul();
       return;
     }
-    if (stage === 'BITE') {
+    if (stageRef.current === 'BITE') {
       handleStrike();
       return;
     }
-    if (stage === 'LANDING') {
+    if (stageRef.current === 'LANDING') {
       handleAcceptCatch();
       return;
     }
-    if (stage === 'REELING') {
+    if (stageRef.current === 'REELING') {
       // Screen tapped or clicked: remind player that controls are 100% via camera gestures
       setControlWarning('☝️ УПРАВЛЕНИЕ ТОЛЬКО ЧЕРЕЗ КАМЕРУ! НАВЕДИТЕ УКАЗАТЕЛЬНЫЙ ПАЛЕЦ НА РЫБУ В ОБЪЕКТИВЕ!');
       setTimeout(() => setControlWarning(null), 2500);
@@ -1361,7 +1361,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   const triggerLost = (reason?: string) => {
     // Guard: Never allow lost sequence to overwrite a successful catch!
-    if (hasAwardedRef.current || stage === 'CATCH_SUCCESS') return;
+    if (hasAwardedRef.current || stageRef.current === 'CATCH_SUCCESS') return;
     isRoundFinishedRef.current = true;
     consecutiveFailsRef.current += 1;
     setConsecutiveFails(consecutiveFailsRef.current);
@@ -1388,8 +1388,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }
     setIsFoul(false);
     setLostReason(reason || 'Леска сорвалась. В следующий раз держите палец точнее над рыбой!');
+    stageRef.current = 'LOST';
     setStage('LOST');
     setTimeout(() => {
+      stageRef.current = 'IDLE';
       setStage('IDLE');
     }, consecutiveFailsRef.current >= 2 ? 3200 : 2400);
   };
@@ -1761,7 +1763,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 e.stopPropagation();
                 handleStrike();
               }}
-              className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-black font-arcade text-xs font-bold border-2 border-white shadow-[0_0_20px_rgba(245,158,11,0.8)] cursor-pointer"
+              disabled={biteTimeLeft <= 0}
+              className="w-full py-3 bg-amber-400 hover:bg-amber-300 text-black font-arcade text-xs font-bold border-2 border-white shadow-[0_0_20px_rgba(245,158,11,0.8)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {t('fishing.strikeBtn')}
             </button>
