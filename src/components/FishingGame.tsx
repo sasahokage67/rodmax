@@ -61,7 +61,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [handPos, setHandPos] = useState<Position2D>({ x: 50, y: 50 });
   const [isLockedOn, setIsLockedOn] = useState(false);
   const [catchProgress, setCatchProgress] = useState(50);
-  const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 1500)
+  const [offTargetMs, setOffTargetMs] = useState(0); // Cumulative off-target ms (max 2500)
   const [lostReason, setLostReason] = useState<string | null>(null);
 
   // Performance & Video refs
@@ -94,8 +94,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFoulTimeRef = useRef(0);
 
-  // 0.75s Fast Bite/Strike Window State
-  const [biteTimeLeft, setBiteTimeLeft] = useState(0.75);
+  // 1.10s Strike Window State
+  const [biteTimeLeft, setBiteTimeLeft] = useState(1.10);
   const biteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 1.0s Rapid Acceptance Window State
@@ -107,7 +107,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const hasAwardedRef = useRef(false);
   const biteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cumulative Off-Target Timeout: snaps if total off-target time reaches 1500ms
+  // Cumulative Off-Target Timeout: snaps if total off-target time reaches 2500ms
   const cumulativeOffTargetMsRef = useRef(0);
   const lastTickTimeRef = useRef(Date.now());
 
@@ -146,47 +146,48 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Initial progress by rarity tier (High base progress for fast, snappy reeling)
   const getInitialProgress = (rarity: RarityType) => {
     switch (rarity) {
-      case 'COMMON': return 55;
-      case 'UNCOMMON': return 50;
-      case 'RARE': return 45;
-      case 'EPIC': return 40;
-      case 'MYTHIC': return 35;
-      case 'SECRET': return 30;
-      case 'GODLY': return 28;
-      case 'ARCANE': return 25;
-      default: return 40;
+      case 'COMMON': return 60;
+      case 'UNCOMMON': return 55;
+      case 'RARE': return 50;
+      case 'EPIC': return 48;
+      case 'MYTHIC': return 45;
+      case 'SECRET': return 42;
+      case 'GODLY': return 40;
+      case 'ARCANE': return 38;
+      default: return 45;
     }
   };
 
   // Scaled Difficulty Parameters: Fast arcade reeling (2 - 3.5 seconds total hold time)
+  // Balanced to be responsive, fair, and achievable with optical webcam tracking
   const getFishDifficultyParams = (fish: FishItem) => {
     switch (fish.rarity) {
       case 'COMMON':
         // Fast catch (~1.5s - 2.0s)
-        return { targetRadius: 26, swimSpeed: 0.12, gain: 2.2, loss: 0.40, changeInterval: 42, evasion: 0.04 };
+        return { targetRadius: 28, swimSpeed: 0.10, gain: 2.6, loss: 0.28, changeInterval: 45, evasion: 0.0 };
       case 'UNCOMMON':
-        // Snappy catch (~2.0s - 2.5s)
-        return { targetRadius: 20, swimSpeed: 0.18, gain: 1.9, loss: 0.45, changeInterval: 24, evasion: 0.08 };
+        // Snappy catch (~1.8s - 2.2s)
+        return { targetRadius: 24, swimSpeed: 0.13, gain: 2.2, loss: 0.32, changeInterval: 32, evasion: 0.04 };
       case 'RARE':
-        // Dynamic (~2.5s - 2.8s)
-        return { targetRadius: 17, swimSpeed: 0.23, gain: 1.7, loss: 0.50, changeInterval: 18, evasion: 0.12 };
+        // Dynamic (~2.0s - 2.5s)
+        return { targetRadius: 21, swimSpeed: 0.17, gain: 2.0, loss: 0.36, changeInterval: 24, evasion: 0.06 };
       case 'EPIC':
-        // Lively (~2.8s - 3.2s)
-        return { targetRadius: 15, swimSpeed: 0.28, gain: 1.5, loss: 0.55, changeInterval: 14, evasion: 0.16 };
+        // Lively (~2.2s - 2.8s)
+        return { targetRadius: 19, swimSpeed: 0.20, gain: 1.8, loss: 0.40, changeInterval: 20, evasion: 0.08 };
       case 'MYTHIC':
-        // Agile (~3.2s - 3.5s)
-        return { targetRadius: 13, swimSpeed: 0.34, gain: 1.4, loss: 0.60, changeInterval: 11, evasion: 0.20 };
+        // Agile (~2.5s - 3.0s)
+        return { targetRadius: 17, swimSpeed: 0.24, gain: 1.7, loss: 0.42, changeInterval: 16, evasion: 0.10 };
       case 'SECRET':
-        // Evasive (~3.5s - 3.8s)
-        return { targetRadius: 11, swimSpeed: 0.40, gain: 1.3, loss: 0.65, changeInterval: 9, evasion: 0.24 };
+        // Evasive (~2.8s - 3.2s)
+        return { targetRadius: 16, swimSpeed: 0.27, gain: 1.6, loss: 0.45, changeInterval: 14, evasion: 0.12 };
       case 'GODLY':
-        // Elite (~3.8s - 4.0s)
-        return { targetRadius: 9.5, swimSpeed: 0.46, gain: 1.2, loss: 0.70, changeInterval: 7, evasion: 0.28 };
+        // Elite (~3.0s - 3.4s)
+        return { targetRadius: 15, swimSpeed: 0.30, gain: 1.5, loss: 0.48, changeInterval: 12, evasion: 0.14 };
       case 'ARCANE':
-        // Boss tier (~4.0s - 4.5s)
-        return { targetRadius: 8.5, swimSpeed: 0.52, gain: 1.1, loss: 0.75, changeInterval: 6, evasion: 0.32 };
+        // Boss tier (~3.2s - 3.6s)
+        return { targetRadius: 14, swimSpeed: 0.33, gain: 1.4, loss: 0.50, changeInterval: 10, evasion: 0.15 };
       default:
-        return { targetRadius: 16, swimSpeed: 0.22, gain: 1.6, loss: 0.50, changeInterval: 20, evasion: 0.14 };
+        return { targetRadius: 18, swimSpeed: 0.18, gain: 1.8, loss: 0.38, changeInterval: 22, evasion: 0.08 };
     }
   };
 
@@ -560,28 +561,27 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const dy = rawTargetY - currentY;
           const distance = Math.hypot(dx, dy);
 
-          // 1. Outlier spike suppressor: clamp wild jumps > 15% in a single 30ms frame
+          // 1. Outlier spike suppressor: clamp extreme teleport sensor glitch (> 60%)
           let clampedTargetX = rawTargetX;
           let clampedTargetY = rawTargetY;
-          if (distance > 15) {
-            const scale = 15 / distance;
+          if (distance > 60) {
+            const scale = 60 / distance;
             clampedTargetX = currentX + dx * scale;
             clampedTargetY = currentY + dy * scale;
           }
 
-          // 2. Dual-Regime 1 Euro Velocity-Adaptive Smoothing with Deadband:
-          // - Hovering / still (< 0.8%): Heavy smoothing + deadband = 100% frozen cursor, ZERO JITTER!
-          // - Moving fast (> 5.0%): High alpha = 0.78 = Instant 60 FPS response, ZERO LAG!
-          let alpha = 0.16;
-          if (distance < 0.25) {
-            alpha = 0.04; // True Deadband: micro-noise is completely frozen
-          } else if (distance < 0.8) {
-            alpha = 0.16; // Hovering: strong low-pass filter
-          } else if (distance > 5.0) {
-            alpha = 0.78; // Fast movement: instant reaction
+          // 2. Zero-Lag 60 FPS Velocity-Adaptive Responsive Filter:
+          // - Active tracking (> 1.5%): alpha = 0.94 -> instant 60 FPS response, ZERO input lag!
+          // - Fine steering (0.20% - 1.5%): alpha = 0.72 -> razor-sharp with subtle stability
+          // - Deadband (< 0.20%): alpha = 0.08 -> freezes camera sensor noise when holding still
+          let alpha = 0.72;
+          if (distance < 0.20) {
+            alpha = 0.08;
+          } else if (distance > 1.5) {
+            alpha = 0.94;
           } else {
-            const t = (distance - 0.8) / (5.0 - 0.8);
-            alpha = 0.16 + t * (0.78 - 0.16);
+            const t = (distance - 0.20) / (1.5 - 0.20);
+            alpha = 0.08 + t * (0.94 - 0.08);
           }
 
           handPosRef.current.x += (clampedTargetX - currentX) * alpha;
@@ -718,7 +718,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       }
 
       prevPixels = new Uint8ClampedArray(data);
-    }, 30);
+    }, 16);
 
     return () => clearInterval(interval);
   }, [cameraStatus, stage]);
@@ -818,11 +818,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setTargetFish(rolled);
     setStage('BITE');
 
-    // Strict 0.75s fast strike window:
-    setBiteTimeLeft(0.75);
+    // Strike window: 1.10s for fair reaction time with optical camera
+    setBiteTimeLeft(1.10);
     if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
     const biteStart = Date.now();
-    const biteDuration = 750; // 0.75s!
+    const biteDuration = 1100; // 1.10s!
 
     biteIntervalRef.current = setInterval(() => {
       const remaining = Math.max(0, (biteDuration - (Date.now() - biteStart)) / 1000);
@@ -835,7 +835,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
         isRoundFinishedRef.current = true;
         sound.playSnap();
-        triggerLost('ВЫ НЕ УСПЕЛИ РЕЗКО ПОДВИНУТЬ ПАЛЕЦ В КАМЕРУ ЗА 0.75 СЕК! Рыба сорвалась с крючка!');
+        triggerLost('ВЫ НЕ УСПЕЛИ РЕЗКО ПОДВИНУТЬ ПАЛЕЦ В КАМЕРУ ЗА 1.1 СЕК! Рыба сорвалась с крючка!');
       }
     }, 20);
   };
@@ -965,14 +965,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const distance = Math.hypot(distX, distY);
 
       const enterRadius = diffParams.targetRadius;
-      const exitRadius = diffParams.targetRadius + 2.0;
+      const exitRadius = diffParams.targetRadius + 3.5;
       const isLocked = isLockedOnRef.current ? (distance <= exitRadius) : (distance <= enterRadius);
       isLockedOnRef.current = isLocked;
 
       // 4. EVASION BEHAVIOR: Continuous escape velocity (Smooth acceleration, ZERO teleport jitter)
       if (isLocked && diffParams.evasion > 0) {
         const safeDist = distance || 1;
-        const escapeSpeed = diffParams.swimSpeed * 5 * diffParams.evasion;
+        const escapeSpeed = diffParams.swimSpeed * 2.2 * diffParams.evasion;
         vx -= (distX / safeDist) * escapeSpeed;
         vy -= (distY / safeDist) * escapeSpeed;
 
@@ -1004,35 +1004,57 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         setIsLockedOn(isLocked);
       }
 
-      // 5. CUMULATIVE OFF-TARGET TIMEOUT (User Requirement: 1.5s cumulative across the round)
+      // 5. CUMULATIVE OFF-TARGET TIMEOUT & ACTIVE TENSION RELIEF (2.5s tolerance)
       if (!isLocked) {
         cumulativeOffTargetMsRef.current += deltaMs;
         const ms = cumulativeOffTargetMsRef.current;
 
         // Direct DOM update for off-target gauge
         if (offTargetBarRef.current) {
-          offTargetBarRef.current.style.width = `${Math.min(100, (ms / 1500) * 100).toFixed(1)}%`;
+          offTargetBarRef.current.style.width = `${Math.min(100, (ms / 2500) * 100).toFixed(1)}%`;
           offTargetBarRef.current.className = `h-full transition-none ${
-            ms > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : ms > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
+            ms > 1700 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : ms > 800 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
           }`;
         }
         if (offTargetTextRef.current) {
-          offTargetTextRef.current.className = ms > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400';
+          offTargetTextRef.current.className = ms > 1200 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400';
           offTargetTextRef.current.textContent = ms > 0 
-            ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(ms / 1000).toFixed(2)}с / 1.50с` : `⚠️ OFF-TARGET: ${(ms / 1000).toFixed(2)}s / 1.50s`) 
-            : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)' : '✓ TARGET LOCKED (0.00s / 1.50s)');
+            ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(ms / 1000).toFixed(2)}с / 2.50с` : `⚠️ OFF-TARGET: ${(ms / 1000).toFixed(2)}s / 2.50s`) 
+            : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 2.50с)' : '✓ TARGET LOCKED (0.00s / 2.50s)');
         }
         if (offTargetToleranceRef.current) {
-          offTargetToleranceRef.current.className = ms > 1000 ? 'text-red-400 font-bold' : ms > 500 ? 'text-amber-400' : 'text-emerald-400';
-          offTargetToleranceRef.current.textContent = `${language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: ${Math.max(0, (1500 - ms) / 1000).toFixed(2)}s`;
+          offTargetToleranceRef.current.className = ms > 1700 ? 'text-red-400 font-bold' : ms > 800 ? 'text-amber-400' : 'text-emerald-400';
+          offTargetToleranceRef.current.textContent = `${language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: ${Math.max(0, (2500 - ms) / 1000).toFixed(2)}s`;
         }
 
-        if (cumulativeOffTargetMsRef.current >= 1500) {
+        if (cumulativeOffTargetMsRef.current >= 2500) {
           isRoundFinishedRef.current = true;
           clearInterval(loop);
           sound.playSnap();
-          triggerLost('ЛЕСКА ПОРВАНА: палец был вне рыбы суммарно более 1.5 секунды!');
+          triggerLost('ЛЕСКА ПОРВАНА: палец был вне рыбы суммарно более 2.5 секунды!');
           return;
+        }
+      } else {
+        // Active tension relief: line strain cools down while holding target!
+        if (cumulativeOffTargetMsRef.current > 0) {
+          cumulativeOffTargetMsRef.current = Math.max(0, cumulativeOffTargetMsRef.current - deltaMs * 0.75);
+          const ms = cumulativeOffTargetMsRef.current;
+          if (offTargetBarRef.current) {
+            offTargetBarRef.current.style.width = `${Math.min(100, (ms / 2500) * 100).toFixed(1)}%`;
+            offTargetBarRef.current.className = `h-full transition-none ${
+              ms > 1700 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : ms > 800 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
+            }`;
+          }
+          if (offTargetTextRef.current) {
+            offTargetTextRef.current.className = ms > 1200 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400';
+            offTargetTextRef.current.textContent = ms > 0 
+              ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(ms / 1000).toFixed(2)}с / 2.50с` : `⚠️ OFF-TARGET: ${(ms / 1000).toFixed(2)}s / 2.50s`) 
+              : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 2.50с)' : '✓ TARGET LOCKED (0.00s / 2.50s)');
+          }
+          if (offTargetToleranceRef.current) {
+            offTargetToleranceRef.current.className = ms > 1700 ? 'text-red-400 font-bold' : ms > 800 ? 'text-amber-400' : 'text-emerald-400';
+            offTargetToleranceRef.current.textContent = `${language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: ${Math.max(0, (2500 - ms) / 1000).toFixed(2)}s`;
+          }
         }
       }
 
@@ -1476,7 +1498,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 
                 <div className="space-y-1 font-mono text-[9px] text-zinc-200">
                   <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'Не двигайте рукой' : 'Do not move hand'}</span> {language === 'ru' ? 'до поклевки (иначе штраф за фальстарт).' : 'before bite (false start penalty).'}</div>
-                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'При надписи «КЛЮЕТ!»' : 'When «FISH ON!» appears'}</span> {language === 'ru' ? 'резко дерните пальцем в камеру (окно 0.75с).' : 'rapidly thrust finger toward camera (0.75s).'}</div>
+                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'При надписи «КЛЮЕТ!»' : 'When «FISH ON!» appears'}</span> {language === 'ru' ? 'резко дерните пальцем в камеру (окно 1.1с).' : 'rapidly thrust finger toward camera (1.1s).'}</div>
                   <div>• <span className="text-emerald-400 font-bold">{language === 'ru' ? 'Ведите пальцем за рыбой:' : 'Steer finger over fish:'}</span> {language === 'ru' ? 'следите за бирюзовым прицелом ☝️ в окне камеры справа внизу.' : 'track the cyan reticle ☝️ in bottom-right camera view.'}</div>
                 </div>
               </div>
@@ -1587,7 +1609,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* BITE Event Alert: 0.75s Rapid Strike QTE */}
+        {/* BITE Event Alert: 1.10s Rapid Strike QTE */}
         {stage === 'BITE' && (
           <div 
             onClick={handleStrike}
@@ -1600,18 +1622,18 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
               {t('fishing.biteAlert')}
             </div>
 
-            {/* Live 0.75s Fast Shrinking Timer Bar */}
+            {/* Live 1.10s Strike Timer Bar */}
             <div className="space-y-1">
               <div className="flex justify-between font-arcade text-[10px]">
                 <span className="text-red-400 font-bold animate-pulse">
                   {language === 'ru' ? 'ОКНО НА ПОДСЕЧКУ:' : 'STRIKE WINDOW:'}
                 </span>
-                <span className="text-amber-300 font-bold text-xs">{biteTimeLeft.toFixed(2)}s / 0.75s</span>
+                <span className="text-amber-300 font-bold text-xs">{biteTimeLeft.toFixed(2)}s / 1.10s</span>
               </div>
               <div className="w-full h-3 bg-black border border-amber-400 p-0.5 overflow-hidden">
                 <div 
                   className="h-full bg-gradient-to-r from-red-600 via-amber-400 to-emerald-400 transition-all duration-75"
-                  style={{ width: `${Math.max(0, Math.min(100, (biteTimeLeft / 0.75) * 100))}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, (biteTimeLeft / 1.10) * 100))}%` }}
                 />
               </div>
             </div>
@@ -1726,31 +1748,31 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </div>
                 </div>
 
-                {/* Cumulative 1.5s Off-Target Tolerance Gauge */}
+                {/* Cumulative 2.5s Off-Target Tolerance Gauge */}
                 <div className="space-y-1 pt-1 border-t border-emerald-500/20">
                   <div className="flex justify-between font-arcade text-[8px]">
                     <span 
                       ref={offTargetTextRef}
-                      className={offTargetMs > 750 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}
+                      className={offTargetMs > 1200 ? 'text-red-400 font-bold animate-pulse' : 'text-zinc-400'}
                     >
                       {offTargetMs > 0 
-                        ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(offTargetMs / 1000).toFixed(2)}с / 1.50с` : `⚠️ OFF-TARGET: ${(offTargetMs / 1000).toFixed(2)}s / 1.50s`) 
-                        : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 1.50с)' : '✓ TARGET LOCKED (0.00s / 1.50s)')}
+                        ? (language === 'ru' ? `⚠️ СХОД ЦЕЛИ: ${(offTargetMs / 1000).toFixed(2)}с / 2.50с` : `⚠️ OFF-TARGET: ${(offTargetMs / 1000).toFixed(2)}s / 2.50s`) 
+                        : (language === 'ru' ? '✓ ПРИЦЕЛ СТАБИЛЕН (0.00с / 2.50с)' : '✓ TARGET LOCKED (0.00s / 2.50s)')}
                     </span>
                     <span 
                       ref={offTargetToleranceRef}
-                      className={offTargetMs > 1000 ? 'text-red-400 font-bold' : offTargetMs > 500 ? 'text-amber-400' : 'text-emerald-400'}
+                      className={offTargetMs > 1700 ? 'text-red-400 font-bold' : offTargetMs > 800 ? 'text-amber-400' : 'text-emerald-400'}
                     >
-                      {language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: {Math.max(0, (1500 - offTargetMs) / 1000).toFixed(2)}s
+                      {language === 'ru' ? 'ЗАПАС' : 'TOLERANCE'}: {Math.max(0, (2500 - offTargetMs) / 1000).toFixed(2)}s
                     </span>
                   </div>
                   <div className="w-full h-2 bg-black border border-zinc-700 p-0.5 overflow-hidden">
                     <div 
                       ref={offTargetBarRef}
                       className={`h-full transition-none ${
-                        offTargetMs > 1000 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : offTargetMs > 500 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
+                        offTargetMs > 1700 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : offTargetMs > 800 ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-emerald-500'
                       }`}
-                      style={{ width: `${Math.min(100, (offTargetMs / 1500) * 100).toFixed(1)}%` }}
+                      style={{ width: `${Math.min(100, (offTargetMs / 2500) * 100).toFixed(1)}%` }}
                     />
                   </div>
                 </div>
@@ -1912,7 +1934,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                   </span>
                 </div>
                 <div>• {language === 'ru' ? 'Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальстарт).' : 'Do not move hand before «FISH ON!» (or false start).'}</div>
-                <div>• {language === 'ru' ? 'При поклевке резко двиньте палец в камеру за 0.75с.' : 'When bite occurs, rapidly thrust finger towards camera within 0.75s.'}</div>
+                <div>• {language === 'ru' ? 'При поклевке резко двиньте палец в камеру за 1.1с.' : 'When bite occurs, rapidly thrust finger towards camera within 1.1s.'}</div>
                 <div>• {language === 'ru' ? 'В вываживании держите бирюзовый прицел ☝️ на рыбе.' : 'During reeling, keep the cyan reticle ☝️ over the fish.'}</div>
               </div>
             )}
