@@ -119,6 +119,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const webcamVideoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
+  const bgBufferRef = useRef<Float32Array | null>(null); // Running background model for static object rejection
+  const activityMapRef = useRef<Uint8Array | null>(null); // Motion History Image (MHI) to isolate dynamic hand from room objects
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
 
@@ -307,6 +309,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       const frame = ctx.getImageData(0, 0, 128, 96);
       const data = frame.data;
 
+      // Initialize background model and motion history buffer
+      if (!bgBufferRef.current || bgBufferRef.current.length !== 128 * 96 * 3) {
+        bgBufferRef.current = new Float32Array(128 * 96 * 3);
+        for (let i = 0; i < data.length; i++) {
+          bgBufferRef.current[i] = data[i];
+        }
+      }
+      if (!activityMapRef.current || activityMapRef.current.length !== 128 * 96) {
+        activityMapRef.current = new Uint8Array(128 * 96);
+      }
+
+      const bg = bgBufferRef.current;
+      const activityMap = activityMapRef.current;
+
       if (prevPixels) {
         let diffSum = 0;
         let motionWeightedX = 0;
@@ -328,25 +344,58 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const x = pixelIdx % 128;
           const y = Math.floor(pixelIdx / 128);
 
-          // Motion filter: exclude very top edge (y < 12 out of 96) where ceiling lights or hair flutter
+          // 1. Running Background Subtraction (Foreground vs Background Wall/Painting)
+          const bgR = bg[i];
+          const bgG = bg[i+1];
+          const bgB = bg[i+2];
+          const fgDiff = (Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB)) / 3;
+
+          // Background adapts ONLY to stationary pixels (learning rate ~0.02)
+          if (diff <= 8) {
+            bg[i] += (r - bgR) * 0.02;
+            bg[i+1] += (g - bgG) * 0.02;
+            bg[i+2] += (b - bgB) * 0.02;
+          }
+
+          // 2. Motion History Image (MHI): Tracks recent activity for 45 ticks (~1.5s)
+          // Static objects (paintings, wall decor, furniture) decay to 0 and are 100% rejected!
           if (diff > 13) {
-            diffSum += diff;
+            activityMap[pixelIdx] = 45;
             if (y >= 12) {
+              diffSum += diff;
               motionWeightedX += x;
               motionWeightedY += y;
               motionPoints++;
             }
+          } else if (activityMap[pixelIdx] > 0) {
+            activityMap[pixelIdx]--;
           }
 
-          // Robust hand skin detection across pale/tan/deep skin and diverse webcams
-          const isSkin = (r > 38 && g > 18 && b > 10 && r > b && (r >= g - 14) && (r - g) < 95);
-          if (isSkin) {
-            skinMask[pixelIdx] = 1;
+          // 3. Strict Human Skin Chromaticity Filter in Normalized (r, g) Space
+          // Rejects wood frames, brown paint, yellow light, beige wallpaper, and posters
+          const sum = r + g + b;
+          if (sum > 90 && sum < 680) {
+            const normR = r / sum;
+            const normG = g / sum;
+
+            const isChromaSkin = (normR >= 0.36 && normR <= 0.58) &&
+                                 (normG >= 0.25 && normG <= 0.38) &&
+                                 (normR > normG) &&
+                                 (r > g && g > b) &&
+                                 (r - g >= 12) &&
+                                 (r - b >= 22) &&
+                                 ((r - g) < 85);
+
+            // A pixel is ONLY candidate hand skin if it matches true human skin chromaticity
+            // AND is physically in the FOREGROUND (fgDiff > 16 OR actively moving in MHI)!
+            if (isChromaSkin && (fgDiff > 16 || activityMap[pixelIdx] > 0)) {
+              skinMask[pixelIdx] = 1;
+            }
           }
         }
 
         const avgMotion = Math.min(100, Math.floor(diffSum / 480));
-        // Direct DOM update for motion percentage in HUD (avoids full component re-render)
+        // Direct DOM update for motion percentage in HUD
         if (motionIntensityTextRef.current && Math.abs(avgMotion - lastReportedMotionRef.current) >= 2) {
           lastReportedMotionRef.current = avgMotion;
           motionIntensityTextRef.current.textContent = `${avgMotion}%`;
@@ -362,14 +411,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const motionY = motionWeightedY / motionPoints;
 
           const dist = Math.hypot(motionX - handAnchorRef.current.x, motionY - handAnchorRef.current.y);
-          if (dist > 30) {
-            // Rapid hand jump: snap directly
+          if (dist > 32) {
             handAnchorRef.current.x = motionX;
             handAnchorRef.current.y = motionY;
           } else if (dist > 5) {
-            // Smooth tracking follow with deadband of 5 pixels (prevents anchor vibration)
-            handAnchorRef.current.x += (motionX - handAnchorRef.current.x) * 0.45;
-            handAnchorRef.current.y += (motionY - handAnchorRef.current.y) * 0.45;
+            handAnchorRef.current.x += (motionX - handAnchorRef.current.x) * 0.40;
+            handAnchorRef.current.y += (motionY - handAnchorRef.current.y) * 0.40;
           }
         }
 
@@ -378,10 +425,10 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         const anchorX = Math.round(handAnchorRef.current.x);
         const anchorY = Math.round(handAnchorRef.current.y);
 
-        const roiMinX = Math.max(0, anchorX - 32);
-        const roiMaxX = Math.min(127, anchorX + 32);
-        const roiMinY = Math.max(14, anchorY - 36);
-        const roiMaxY = Math.min(95, anchorY + 36);
+        const roiMinX = Math.max(0, anchorX - 30);
+        const roiMaxX = Math.min(127, anchorX + 30);
+        const roiMinY = Math.max(14, anchorY - 34);
+        const roiMaxY = Math.min(95, anchorY + 34);
 
         let handSkinCount = 0;
         let handSumX = 0;
@@ -417,35 +464,49 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             handAnchorRef.current.y += (handCy - handAnchorRef.current.y) * 0.20;
           }
 
-          // WEIGHTED CONTINUOUS SUB-PIXEL FINGERTIP APEX EXTRACTION:
-          // In the isolated hand, handMinY is the topmost tip of the outstretched finger.
-          // We compute a continuous sub-pixel centroid with quadratic proximity weighting:
-          let weightSum = 0;
-          let weightedX = 0;
-          let weightedY = 0;
-          const apexSliceLimit = Math.min(handMaxY, handMinY + 6);
-
-          for (let y = handMinY; y <= apexSliceLimit; y++) {
-            const rowDist = y - handMinY;
-            const rowWeight = (7 - rowDist) * (7 - rowDist); // 49, 36, 25, 16, 9, 4, 1
-
+          // 4. Morphological Fingertip Apex Width Verification:
+          // An outstretched index finger tip has width between 3px and 14px.
+          // Wide flat objects (paintings, furniture, posters) have width > 16px and are rejected!
+          let apexSliceMinX = 128, apexSliceMaxX = 0;
+          for (let y = handMinY; y <= Math.min(handMaxY, handMinY + 3); y++) {
             const rowOffset = y * 128;
             for (let x = handMinX; x <= handMaxX; x++) {
               if (skinMask[rowOffset + x] === 1) {
-                weightedX += x * rowWeight;
-                weightedY += y * rowWeight;
-                weightSum += rowWeight;
+                if (x < apexSliceMinX) apexSliceMinX = x;
+                if (x > apexSliceMaxX) apexSliceMaxX = x;
               }
             }
           }
+          const apexWidth = apexSliceMaxX >= apexSliceMinX ? (apexSliceMaxX - apexSliceMinX + 1) : 0;
 
-          if (weightSum > 0) {
-            const subpixelX = weightedX / weightSum;
-            const subpixelY = weightedY / weightSum;
+          if (apexWidth > 0 && apexWidth <= 14) {
+            let weightSum = 0;
+            let weightedX = 0;
+            let weightedY = 0;
+            const apexSliceLimit = Math.min(handMaxY, handMinY + 6);
 
-            // Mirrored X for natural user orientation (like looking in a mirror)
-            rawTargetX = (1 - subpixelX / 128) * 100;
-            rawTargetY = (subpixelY / 96) * 100;
+            for (let y = handMinY; y <= apexSliceLimit; y++) {
+              const rowDist = y - handMinY;
+              const rowWeight = (7 - rowDist) * (7 - rowDist); // 49, 36, 25, 16, 9, 4, 1
+
+              const rowOffset = y * 128;
+              for (let x = handMinX; x <= handMaxX; x++) {
+                if (skinMask[rowOffset + x] === 1) {
+                  weightedX += x * rowWeight;
+                  weightedY += y * rowWeight;
+                  weightSum += rowWeight;
+                }
+              }
+            }
+
+            if (weightSum > 0) {
+              const subpixelX = weightedX / weightSum;
+              const subpixelY = weightedY / weightSum;
+
+              // Mirrored X for natural user orientation (like looking in a mirror)
+              rawTargetX = (1 - subpixelX / 128) * 100;
+              rawTargetY = (subpixelY / 96) * 100;
+            }
           }
         }
 
@@ -477,7 +538,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           // - Moving fast (> 5.0%): High alpha = 0.78 = Instant 60 FPS response, ZERO LAG!
           let alpha = 0.16;
           if (distance < 0.25) {
-            alpha = 0.05; // True Deadband: micro-noise is completely frozen
+            alpha = 0.04; // True Deadband: micro-noise is completely frozen
           } else if (distance < 0.8) {
             alpha = 0.16; // Hovering: strong low-pass filter
           } else if (distance > 5.0) {
