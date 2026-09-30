@@ -39,6 +39,7 @@ interface Position2D {
 
 // Module-level cache flag so preloading only happens once per session
 let isGlobalAssetsPreloaded = false;
+const videoBlobMap: Record<string, string> = {};
 
 const ASSETS_TO_PRELOAD = [
   { type: 'video', url: '/assets/video_reeling_idle.mp4', label: 'Океан' },
@@ -154,7 +155,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
   const bgBufferRef = useRef<Float32Array | null>(null); // Running background model for static object rejection
   const activityMapRef = useRef<Uint8Array | null>(null); // Motion History Image (MHI) to isolate dynamic hand from room objects
-  const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const idleVideoRef = useRef<HTMLVideoElement>(null);
+  const catchVideoRef = useRef<HTMLVideoElement>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
 
   // Direct DOM refs for 60 FPS Reeling & Optical HUD (Zero React re-renders)
@@ -328,10 +330,12 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     ASSETS_TO_PRELOAD.forEach(async (asset) => {
       try {
         if (asset.type === 'video') {
-          // Fetch into browser cache so it's instantly available without network delay
+          // Fetch into in-memory blob URL to eliminate network negotiation and disk decoding latency
           const res = await fetch(asset.url);
           if (res.ok) {
-            await res.blob();
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            videoBlobMap[asset.url] = blobUrl;
           }
         } else {
           // Image preload
@@ -834,6 +838,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearTimeout(catchCinematicTimerRef.current);
       catchCinematicTimerRef.current = null;
     }
+    if (catchVideoRef.current) {
+      catchVideoRef.current.pause();
+    }
     setIsCatchCardRevealed(false);
 
     sound.playCast();
@@ -873,6 +880,15 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     const rolled = rollFish();
     targetFishRef.current = rolled;
     setTargetFish(rolled);
+
+    // Hardware-prewarm catch cinematic in the background during bite & reeling
+    if (catchVideoRef.current && rolled.catchVideo) {
+      const blobUrl = videoBlobMap[rolled.catchVideo] || rolled.catchVideo;
+      catchVideoRef.current.src = blobUrl;
+      catchVideoRef.current.preload = 'auto';
+      catchVideoRef.current.load();
+    }
+
     setStage('BITE');
     stageRef.current = 'BITE';
 
@@ -1176,8 +1192,8 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       clearTimeout(catchCinematicTimerRef.current);
       catchCinematicTimerRef.current = null;
     }
-    if (mainVideoRef.current) {
-      mainVideoRef.current.pause();
+    if (catchVideoRef.current) {
+      catchVideoRef.current.pause();
     }
     setIsCatchCardRevealed(true);
 
@@ -1319,6 +1335,22 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setStage('CATCH_SUCCESS');
     stageRef.current = 'CATCH_SUCCESS';
 
+    // Start playing pre-warmed catch video instantly
+    if (catchVideoRef.current) {
+      const currentFish = targetFishRef.current || targetFish;
+      if (currentFish.catchVideo) {
+        const blobUrl = videoBlobMap[currentFish.catchVideo] || currentFish.catchVideo;
+        if (!catchVideoRef.current.src || !catchVideoRef.current.src.startsWith('blob:')) {
+          catchVideoRef.current.src = blobUrl;
+        }
+        catchVideoRef.current.currentTime = 0;
+        const playPromise = catchVideoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
+      }
+    }
+
     // Audio: water splash & reel click
     sound.playSplash();
     sound.playReelClick();
@@ -1412,51 +1444,50 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         </div>
       )}
 
-      {/* 1. Main Viewport Video Background */}
-      <div className="absolute inset-0 z-0 bg-black">
-        {stage === 'CATCH_SUCCESS' && (lastCaught?.fish?.catchVideo || targetFish.catchVideo) ? (
-          <video
-            key={lastCaught?.id || `catch_${targetFish.id}`}
-            ref={mainVideoRef}
-            src={lastCaught?.fish?.catchVideo || targetFish.catchVideo}
-            autoPlay
-            loop={false}
-            muted
-            playsInline
-            onLoadedMetadata={(e) => {
-              const dur = e.currentTarget.duration;
-              if (dur && !isNaN(dur) && isFinite(dur)) {
-                if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
-                catchCinematicTimerRef.current = setTimeout(() => {
-                  revealCatchCard();
-                }, (dur + 0.5) * 1000);
-              }
-            }}
-            onEnded={() => {
-              if (catchCinematicTimerRef.current) {
-                clearTimeout(catchCinematicTimerRef.current);
-                catchCinematicTimerRef.current = null;
-              }
-              if (mainVideoRef.current) {
-                mainVideoRef.current.pause();
-              }
-              revealCatchCard();
-            }}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <video
-            ref={mainVideoRef}
-            src="/assets/video_reeling_idle.mp4"
-            autoPlay
-            loop
-            muted
-            playsInline
-            className={`w-full h-full object-cover transition-filter duration-300 ${
-              stage === 'BITE' ? 'brightness-125 contrast-125' : ''
-            }`}
-          />
-        )}
+      {/* 1. Main Viewport Video Stack: Zero-blackout Dual Video Architecture */}
+      <div className="absolute inset-0 z-0 overflow-hidden bg-zinc-950">
+        {/* Layer 0: Perpetual idle ocean loop (NEVER unmounts -> guarantees 0 black frames) */}
+        <video
+          ref={idleVideoRef}
+          src={videoBlobMap['/assets/video_reeling_idle.mp4'] || '/assets/video_reeling_idle.mp4'}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${
+            stage === 'BITE' ? 'brightness-125 contrast-125' : ''
+          }`}
+        />
+
+        {/* Layer 1: Hardware-prewarmed catch cinematic (plays in-memory blob instantly) */}
+        <video
+          ref={catchVideoRef}
+          muted
+          playsInline
+          loop={false}
+          onLoadedMetadata={(e) => {
+            const dur = e.currentTarget.duration;
+            if (dur && !isNaN(dur) && isFinite(dur)) {
+              if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
+              catchCinematicTimerRef.current = setTimeout(() => {
+                revealCatchCard();
+              }, (dur + 0.3) * 1000);
+            }
+          }}
+          onEnded={() => {
+            if (catchCinematicTimerRef.current) {
+              clearTimeout(catchCinematicTimerRef.current);
+              catchCinematicTimerRef.current = null;
+            }
+            if (catchVideoRef.current) {
+              catchVideoRef.current.pause();
+            }
+            revealCatchCard();
+          }}
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${
+            stage === 'CATCH_SUCCESS' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none -z-10'
+          }`}
+        />
       </div>
 
       {stage !== 'CATCH_SUCCESS' && (
