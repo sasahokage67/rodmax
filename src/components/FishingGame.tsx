@@ -1216,9 +1216,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         handleCast();
       } else if (stage === 'CATCH_SUCCESS' && e.code === 'Space') {
         e.preventDefault();
-        if (!isCatchCardRevealed) {
-          revealCatchCard();
-        } else {
+        if (isCatchCardRevealed) {
           handleCast();
         }
       } else if (stage === 'WAITING' && e.code === 'Space') {
@@ -1242,12 +1240,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [stage]);
+  }, [stage, isCatchCardRevealed]);
 
   // Pointer Handlers: ONLY allow touch/pen for screen drag
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (stage === 'CATCH_SUCCESS' && !isCatchCardRevealed) {
-      revealCatchCard();
+    if (stage === 'CATCH_SUCCESS') {
       return;
     }
     if (stage === 'WAITING') {
@@ -2062,17 +2059,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           </div>
         )}
 
-        {/* Sleek, non-intrusive skip button while the catch animation video plays */}
-        {stage === 'CATCH_SUCCESS' && lastCaught && !isCatchCardRevealed && (
-          <div className="absolute bottom-6 right-6 z-30 pointer-events-auto">
-            <button
-              onClick={revealCatchCard}
-              className="py-1 px-3 bg-black/60 hover:bg-black/90 text-zinc-400 hover:text-emerald-300 font-arcade text-[8px] sm:text-[9px] border border-white/10 hover:border-emerald-500/50 backdrop-blur-sm transition-all shadow-md"
-            >
-              [ {language === 'ru' ? 'ПРОПУСТИТЬ: ПРОБЕЛ' : 'SKIP: SPACE'} ]
-            </button>
-          </div>
-        )}
 
         {/* CATCH SUCCESS Showcase Modal (REVEAL ONLY AFTER CATCH ANIMATION!) */}
         {stage === 'CATCH_SUCCESS' && lastCaught && isCatchCardRevealed && (
