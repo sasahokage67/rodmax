@@ -18,9 +18,7 @@ import {
   Crosshair,
   Lightbulb,
   AlertCircle,
-  ChevronRight,
-  Terminal,
-  Compass
+  ChevronRight
 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getFishName, getFishDescription, getRarityName } from '../i18n/translations';
@@ -43,23 +41,23 @@ interface Position2D {
 let isGlobalAssetsPreloaded = false;
 
 const ASSETS_TO_PRELOAD = [
-  { type: 'video', url: '/assets/video_reeling_idle.mp4', label: 'Океанический фон штиля' },
-  { type: 'video', url: '/assets/video_catch_boot.mp4', label: 'Анимация вылова: Старый сапог' },
-  { type: 'video', url: '/assets/video_catch_salmon.mp4', label: 'Анимация вылова: Серебристый лосось' },
-  { type: 'video', url: '/assets/video_catch_fish.mp4', label: 'Анимация вылова: Золотой карась' },
-  { type: 'video', url: '/assets/video_catch_generic.mp4', label: 'Анимация вылова: Глубинный удильщик' },
-  { type: 'video', url: '/assets/video_catch_megalodon.mp4', label: 'Анимация вылова: Доисторический мегалодон' },
-  { type: 'video', url: '/assets/video_catch_sea_serpent.mp4', label: 'Анимация вылова: Левиафан бездны' },
-  { type: 'video', url: '/assets/video_catch_celestial_whale.mp4', label: 'Анимация вылова: Небесный кит' },
-  { type: 'video', url: '/assets/video_jellyfish_emerge.mp4', label: 'Анимация вылова: Арканная медуза' },
-  { type: 'image', url: '/assets/card_boot.jpg', label: 'Карточка: Старый сапог' },
-  { type: 'image', url: '/assets/card_salmon.jpg', label: 'Карточка: Серебристый лосось' },
-  { type: 'image', url: '/assets/card_goldfish.jpg', label: 'Карточка: Золотой карась' },
-  { type: 'image', url: '/assets/card_anglerfish.jpg', label: 'Карточка: Глубинный удильщик' },
-  { type: 'image', url: '/assets/card_megalodon.jpg', label: 'Карточка: Доисторический мегалодон' },
-  { type: 'image', url: '/assets/card_sea_serpent.jpg', label: 'Карточка: Левиафан бездны' },
-  { type: 'image', url: '/assets/card_celestial_whale.jpg', label: 'Карточка: Небесный кит' },
-  { type: 'image', url: '/assets/card_arcane_jellyfish.jpg', label: 'Карточка: Арканная медуза' }
+  { type: 'video', url: '/assets/video_reeling_idle.mp4', label: 'Океан' },
+  { type: 'video', url: '/assets/video_catch_boot.mp4', label: 'Старый сапог' },
+  { type: 'video', url: '/assets/video_catch_salmon.mp4', label: 'Серебристый лосось' },
+  { type: 'video', url: '/assets/video_catch_fish.mp4', label: 'Золотой карась' },
+  { type: 'video', url: '/assets/video_catch_generic.mp4', label: 'Глубинный удильщик' },
+  { type: 'video', url: '/assets/video_catch_megalodon.mp4', label: 'Доисторический мегалодон' },
+  { type: 'video', url: '/assets/video_catch_sea_serpent.mp4', label: 'Левиафан бездны' },
+  { type: 'video', url: '/assets/video_catch_celestial_whale.mp4', label: 'Солнечный кит' },
+  { type: 'video', url: '/assets/video_jellyfish_emerge.mp4', label: 'Арканная медуза' },
+  { type: 'image', url: '/assets/card_boot.jpg', label: 'Карточка: Сапог' },
+  { type: 'image', url: '/assets/card_salmon.jpg', label: 'Карточка: Лосось' },
+  { type: 'image', url: '/assets/card_goldfish.jpg', label: 'Карточка: Карась' },
+  { type: 'image', url: '/assets/card_anglerfish.jpg', label: 'Карточка: Удильщик' },
+  { type: 'image', url: '/assets/card_megalodon.jpg', label: 'Карточка: Мегалодон' },
+  { type: 'image', url: '/assets/card_sea_serpent.jpg', label: 'Карточка: Левиафан' },
+  { type: 'image', url: '/assets/card_celestial_whale.jpg', label: 'Карточка: Солнечный кит' },
+  { type: 'image', url: '/assets/card_arcane_jellyfish.jpg', label: 'Карточка: Медуза' }
 ];
 
 export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, openBestiary, setTab }) => {
@@ -75,7 +73,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   // Asset Preloader State
   const [isPreloading, setIsPreloading] = useState(!isGlobalAssetsPreloaded);
   const [preloadProgress, setPreloadProgress] = useState(isGlobalAssetsPreloaded ? 100 : 0);
-  const [preloadStatus, setPreloadStatus] = useState('ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ...');
+  const [preloadStatus, setPreloadStatus] = useState('Загрузка ресурсов...');
 
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
@@ -1374,59 +1372,41 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       {/* Hidden Motion Detection Canvas */}
       <canvas ref={motionCanvasRef} className="hidden" />
 
-      {/* FULL ASSET PRELOADER SCREEN */}
+      {/* ASSET PRELOADER */}
       {isPreloading && (
-        <div className="absolute inset-0 z-50 bg-[#06100a] flex flex-col items-center justify-center p-4 sm:p-6 text-center select-none font-arcade">
-          <div className="absolute inset-0 scanlines opacity-60 pointer-events-none" />
-
-          <div className="relative z-10 max-w-md w-full bg-black/95 border-2 border-emerald-400 p-6 pixel-corners shadow-[0_0_60px_rgba(16,185,129,0.5)] space-y-5">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-emerald-500/30 pb-3">
-              <div className="flex items-center gap-2 text-emerald-400 text-xs">
-                <Terminal className="w-4 h-4 text-emerald-400 animate-pulse" />
-                <span className="tracking-widest font-bold">RODMAX ENGINE // V2.0</span>
-              </div>
-              <div className="text-[9px] font-mono text-cyan-300">
-                17 / 17 РЕСУРСОВ
-              </div>
-            </div>
-
-            {/* Radar / Sonar Calibration Graphic */}
-            <div className="flex justify-center py-2">
-              <div className="relative w-20 h-20 rounded-full border border-emerald-400/40 flex items-center justify-center shadow-[0_0_25px_rgba(16,185,129,0.3)]">
-                <div className="w-16 h-16 rounded-full border border-cyan-400/30 animate-ping absolute" />
-                <div className="w-10 h-10 rounded-full border-2 border-dashed border-emerald-400 animate-[spin_4s_linear_infinite] absolute" />
-                <Compass className="w-6 h-6 text-amber-300 animate-pulse" />
-              </div>
-            </div>
-
-            {/* Progress Telemetry */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] text-zinc-300 font-arcade">
-                <span className="text-emerald-300 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>{language === 'ru' ? 'КЭШИРОВАНИЕ ВИДЕО И КАРТОЧЕК:' : 'CACHING VIDEOS & CARDS:'}</span>
+        <div className="absolute inset-0 z-50 bg-[#09090b] flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-zinc-900/90 border border-white/10 p-6 rounded-md backdrop-blur-md space-y-4 shadow-2xl">
+            {/* Header: Title and Percentage */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <span className="text-xs font-semibold tracking-tight text-white uppercase font-mono">
+                  RODMAX
                 </span>
-                <span className="text-amber-300 font-mono font-bold text-xs">{preloadProgress}%</span>
+                <p className="text-[11px] text-zinc-400 font-mono">
+                  {language === 'ru' ? 'Подготовка ресурсов' : 'Loading assets'}
+                </p>
               </div>
-
-              {/* Progress Bar */}
-              <div className="w-full h-4 bg-zinc-950 border border-emerald-400/70 p-0.5 overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 shadow-[0_0_15px_#34d399] transition-all duration-150"
-                  style={{ width: `${Math.min(100, Math.max(0, preloadProgress))}%` }}
-                />
-              </div>
-
-              {/* Status Line */}
-              <div className="text-[9px] font-mono text-zinc-400 truncate pt-1 text-left">
-                &gt; {preloadStatus}
-              </div>
+              <span className="text-xs font-mono font-medium text-emerald-400 tabular-nums">
+                {preloadProgress}%
+              </span>
             </div>
 
-            <div className="text-[8px] font-mono text-zinc-500 border-t border-emerald-500/20 pt-2 flex justify-between">
-              <span>{language === 'ru' ? 'СКОРОСТЬ ВЫГРУЗКИ: 60 FPS' : 'STREAM RATE: 60 FPS'}</span>
-              <span className="text-emerald-400 font-bold">{language === 'ru' ? 'БЕЗ ЛАГОВ' : 'ZERO LAG READY'}</span>
+            {/* Linear Progress Bar */}
+            <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-emerald-400 transition-all duration-150 ease-out"
+                style={{ width: `${Math.min(100, Math.max(0, preloadProgress))}%` }}
+              />
+            </div>
+
+            {/* Current Item Status */}
+            <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-0.5">
+              <span className="truncate max-w-[220px]">
+                {preloadStatus}
+              </span>
+              <span className="text-zinc-600 tabular-nums">
+                {Math.round((preloadProgress / 100) * ASSETS_TO_PRELOAD.length)} / {ASSETS_TO_PRELOAD.length}
+              </span>
             </div>
           </div>
         </div>
