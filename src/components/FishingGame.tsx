@@ -111,6 +111,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const fishTargetRef = useRef<Position2D>({ x: 50, y: 50 });
   const fishTimerRef = useRef(0);
   const handPosRef = useRef<Position2D>({ x: 50, y: 50 });
+  const handAnchorRef = useRef<Position2D>({ x: 32, y: 30 }); // Localized canvas anchor (0..64, 0..48) to isolate hand from face
   const lastWarningSoundTime = useRef(0);
   const currentProgressRef = useRef(50);
 
@@ -312,11 +313,6 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         let motionWeightedY = 0;
         let motionPoints = 0;
 
-        let skinCount = 0;
-        let skinSumX = 0;
-        let skinSumY = 0;
-        let skinMinX = 64, skinMaxX = 0, skinMinY = 48, skinMaxY = 0;
-
         const skinMask = new Uint8Array(64 * 48);
 
         for (let i = 0; i < data.length; i += 4) {
@@ -332,26 +328,20 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
           const x = pixelIdx % 64;
           const y = Math.floor(pixelIdx / 64);
 
-          if (diff > 14) {
+          // Motion filter: exclude very top edge (y < 6) where ceiling lights or hair flutter
+          if (diff > 13) {
             diffSum += diff;
-            motionWeightedX += x;
-            motionWeightedY += y;
-            motionPoints++;
+            if (y >= 6) {
+              motionWeightedX += x;
+              motionWeightedY += y;
+              motionPoints++;
+            }
           }
 
-          // Robust hand skin detection across skin tones, camera white balances, and lighting
-          const isSkin = (r > 38 && g > 18 && b > 10 && r > b && (r >= g - 12) && (r - g) < 90) ||
-                         (diff > 14 && (r + g + b) > 75 && r > b);
-
+          // Robust hand skin detection across pale/tan/deep skin and diverse webcams
+          const isSkin = (r > 38 && g > 18 && b > 10 && r > b && (r >= g - 14) && (r - g) < 95);
           if (isSkin) {
             skinMask[pixelIdx] = 1;
-            skinCount++;
-            skinSumX += x;
-            skinSumY += y;
-            if (x < skinMinX) skinMinX = x;
-            if (x > skinMaxX) skinMaxX = x;
-            if (y < skinMinY) skinMinY = y;
-            if (y > skinMaxY) skinMaxY = y;
           }
         }
 
@@ -364,96 +354,107 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // =========================================================================================
-        // OUTSTRETCHED INDEX FINGERTIP TRACKING (Apex & Furthest Protrusion from Centroid)
-        // Mathematically locks onto the tip of the outstretched index finger and completely rejects knuckles/wrist
-        // even when the finger is held completely motionless!
+        // HAND REGION OF INTEREST (ROI) ISOLATION: Immune to face / head / ceiling!
         // =========================================================================================
-        let rawTargetX: number | null = null;
-        let rawTargetY: number | null = null;
+        // 1. Update Hand Anchor from active motion if present
+        if (motionPoints >= 5) {
+          const motionX = motionWeightedX / motionPoints;
+          const motionY = motionWeightedY / motionPoints;
 
-        if (skinCount >= 8) {
-          const cx = skinSumX / skinCount;
-          const cy = skinSumY / skinCount;
-
-          // Search upper/forward hemisphere of hand (y <= cy + 3) to exclude forearm/wrist
-          const maxAllowedY = Math.min(skinMaxY, Math.floor(cy + 3));
-          let maxD2 = 0;
-          let apexMinY = 48;
-
-          for (let y = skinMinY; y <= maxAllowedY; y++) {
-            const rowOffset = y * 64;
-            for (let x = skinMinX; x <= skinMaxX; x++) {
-              if (skinMask[rowOffset + x] === 1) {
-                const dx = x - cx;
-                const dy = y - cy;
-                const d2 = dx * dx + dy * dy;
-                if (d2 > maxD2) {
-                  maxD2 = d2;
-                }
-                if (y < apexMinY) {
-                  apexMinY = y;
-                }
-              }
-            }
+          const dist = Math.hypot(motionX - handAnchorRef.current.x, motionY - handAnchorRef.current.y);
+          if (dist > 15) {
+            // Rapid hand jump: snap directly
+            handAnchorRef.current.x = motionX;
+            handAnchorRef.current.y = motionY;
+          } else {
+            // Smooth tracking follow
+            handAnchorRef.current.x += (motionX - handAnchorRef.current.x) * 0.75;
+            handAnchorRef.current.y += (motionY - handAnchorRef.current.y) * 0.75;
           }
+        }
 
-          // Outstretched index finger tip is the narrow extremity with maximum distance from palm centroid
-          const d2Cutoff = Math.max(12, maxD2 * 0.85);
-          let tipSumX = 0;
-          let tipSumY = 0;
-          let tipCount = 0;
+        // 2. Scan for hand skin pixels strictly around the hand anchor
+        // Clamped so y is NEVER in the upper head/hair zone (y >= 8)
+        const anchorX = Math.round(handAnchorRef.current.x);
+        const anchorY = Math.round(handAnchorRef.current.y);
 
-          for (let y = skinMinY; y <= maxAllowedY; y++) {
-            const rowOffset = y * 64;
-            for (let x = skinMinX; x <= skinMaxX; x++) {
-              if (skinMask[rowOffset + x] === 1) {
-                const dx = x - cx;
-                const dy = y - cy;
-                const d2 = dx * dx + dy * dy;
-                // Strict fingertip apex filter: furthest protrusion AND near the topmost tip
-                if (d2 >= d2Cutoff && y <= apexMinY + 4) {
-                  tipSumX += x;
-                  tipSumY += y;
-                  tipCount++;
-                }
-              }
-            }
-          }
+        const roiMinX = Math.max(0, anchorX - 16);
+        const roiMaxX = Math.min(63, anchorX + 16);
+        const roiMinY = Math.max(8, anchorY - 18);
+        const roiMaxY = Math.min(47, anchorY + 18);
 
-          if (tipCount > 0) {
-            // Mirrored X for natural user orientation
-            rawTargetX = (1 - (tipSumX / tipCount) / 64) * 100;
-            rawTargetY = (((tipSumY / tipCount) + 0.2) / 48) * 100;
-          } else if (apexMinY < 48) {
-            let topSumX = 0;
-            let topCount = 0;
-            for (let x = skinMinX; x <= skinMaxX; x++) {
-              if (skinMask[apexMinY * 64 + x] === 1) {
-                topSumX += x;
-                topCount++;
-              }
-            }
-            if (topCount > 0) {
-              rawTargetX = (1 - (topSumX / topCount) / 64) * 100;
-              rawTargetY = ((apexMinY + 0.2) / 48) * 100;
+        let handSkinCount = 0;
+        let handSumX = 0;
+        let handSumY = 0;
+        let handMinX = 64, handMaxX = 0, handMinY = 48, handMaxY = 0;
+
+        for (let y = roiMinY; y <= roiMaxY; y++) {
+          const rowOffset = y * 64;
+          for (let x = roiMinX; x <= roiMaxX; x++) {
+            if (skinMask[rowOffset + x] === 1) {
+              handSkinCount++;
+              handSumX += x;
+              handSumY += y;
+              if (x < handMinX) handMinX = x;
+              if (x > handMaxX) handMaxX = x;
+              if (y < handMinY) handMinY = y;
+              if (y > handMaxY) handMaxY = y;
             }
           }
         }
 
-        // Fallback to motion cluster if skin contrast is too low
-        if (rawTargetX === null && motionPoints > 6) {
+        let rawTargetX: number | null = null;
+        let rawTargetY: number | null = null;
+
+        if (handSkinCount >= 6) {
+          const handCx = handSumX / handSkinCount;
+          const handCy = handSumY / handSkinCount;
+
+          // Gently pull anchor towards detected hand center to prevent drifting
+          handAnchorRef.current.x += (handCx - handAnchorRef.current.x) * 0.35;
+          handAnchorRef.current.y += (handCy - handAnchorRef.current.y) * 0.35;
+
+          // OUTSTRETCHED INDEX FINGERTIP APEX:
+          // In the isolated hand, handMinY is the topmost tip of the outstretched finger!
+          // Take the apex cluster (top 2-3 rows of the hand):
+          let apexSumX = 0;
+          let apexCount = 0;
+          const apexSliceY = Math.min(handMaxY, handMinY + 2);
+
+          for (let y = handMinY; y <= apexSliceY; y++) {
+            const rowOffset = y * 64;
+            for (let x = handMinX; x <= handMaxX; x++) {
+              if (skinMask[rowOffset + x] === 1) {
+                apexSumX += x;
+                apexCount++;
+              }
+            }
+          }
+
+          if (apexCount > 0) {
+            const tipCanvasX = apexSumX / apexCount;
+            const tipCanvasY = handMinY + 0.4;
+
+            // Mirrored X for natural user orientation (like looking in a mirror)
+            rawTargetX = (1 - tipCanvasX / 64) * 100;
+            rawTargetY = (tipCanvasY / 48) * 100;
+          }
+        }
+
+        // Fallback: If skin wasn't prominent in ROI, follow active motion cluster
+        if (rawTargetX === null && motionPoints >= 5) {
           rawTargetX = (1 - (motionWeightedX / motionPoints) / 64) * 100;
           rawTargetY = ((motionWeightedY / motionPoints) / 48) * 100;
         }
 
         if (rawTargetX !== null && rawTargetY !== null) {
-          // Instant 60 FPS response filter (0.84 alpha: zero noticeable latency, smooth trajectory)
-          handPosRef.current.x += (rawTargetX - handPosRef.current.x) * 0.84;
-          handPosRef.current.y += (rawTargetY - handPosRef.current.y) * 0.84;
+          // Low-latency exponential filter (0.80 response rate: smooth, instant, zero jitter)
+          handPosRef.current.x += (rawTargetX - handPosRef.current.x) * 0.80;
+          handPosRef.current.y += (rawTargetY - handPosRef.current.y) * 0.80;
 
-          // Clamp within screen boundaries
-          handPosRef.current.x = Math.max(3, Math.min(97, handPosRef.current.x));
-          handPosRef.current.y = Math.max(3, Math.min(97, handPosRef.current.y));
+          // Clamped strictly within arena boundaries so it never escapes the visible arena
+          handPosRef.current.x = Math.max(4, Math.min(96, handPosRef.current.x));
+          handPosRef.current.y = Math.max(5, Math.min(95, handPosRef.current.y));
 
           // Direct DOM updates: ZERO React re-renders!
           const posX = handPosRef.current.x.toFixed(1);
@@ -483,24 +484,24 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // LOW-THRESHOLD THUMBS UP (👍) GESTURE DETECTOR
-        // Runs in IDLE, CATCH_SUCCESS, LOST using pre-computed skinMask
+        // Runs in IDLE, CATCH_SUCCESS, LOST using isolated hand cluster
         if (stage === 'IDLE' || stage === 'CATCH_SUCCESS' || stage === 'LOST') {
           let isThumbsUpCandidate = false;
           let isWrongGestureCandidate = false;
 
-          if (skinCount >= 8 && (skinMaxY - skinMinY) >= 5 && (skinMaxX - skinMinX) >= 4) {
-            const handH = skinMaxY - skinMinY + 1;
-            const handW = skinMaxX - skinMinX + 1;
-            const topBoundary = skinMinY + Math.max(2, Math.floor(handH * 0.40));
+          if (handSkinCount >= 10 && (handMaxY - handMinY) >= 6 && (handMaxX - handMinX) >= 5) {
+            const handH = handMaxY - handMinY + 1;
+            const handW = handMaxX - handMinX + 1;
+            const topBoundary = handMinY + Math.max(2, Math.floor(handH * 0.40));
 
             let topPixels = 0;
             let bottomPixels = 0;
             let topMinX = 64, topMaxX = 0;
             let bottomMinX = 64, bottomMaxX = 0;
 
-            for (let y = skinMinY; y <= skinMaxY; y++) {
+            for (let y = handMinY; y <= handMaxY; y++) {
               const rowOffset = y * 64;
-              for (let x = skinMinX; x <= skinMaxX; x++) {
+              for (let x = handMinX; x <= handMaxX; x++) {
                 if (skinMask[rowOffset + x] === 1) {
                   if (y <= topBoundary) {
                     topPixels++;
@@ -518,9 +519,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
             const topW = topMaxX >= topMinX ? (topMaxX - topMinX + 1) : 0;
             const bottomW = bottomMaxX >= bottomMinX ? (bottomMaxX - bottomMinX + 1) : 0;
 
-            const isNarrowThumb = topW > 0 && bottomW > 0 && topW <= Math.max(3, Math.floor(bottomW * 0.68));
-            const isSolidFist = bottomPixels >= Math.max(6, Math.floor(topPixels * 1.30));
-            const isVerticalHand = handH >= handW * 0.55 && handH <= handW * 2.5;
+            const isNarrowThumb = topW > 0 && bottomW > 0 && topW <= Math.max(3, Math.floor(bottomW * 0.70));
+            const isSolidFist = bottomPixels >= Math.max(6, Math.floor(topPixels * 1.25));
+            const isVerticalHand = handH >= handW * 0.55 && handH <= handW * 2.6;
             const hasThumbProtrusion = topPixels >= 2;
 
             if (isNarrowThumb && isSolidFist && isVerticalHand && hasThumbProtrusion) {
