@@ -463,151 +463,94 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // =========================================================================================
-        // HAND REGION OF INTEREST (ROI) ISOLATION with ZERO-HEAD / ZERO-BODY GUARDS
+        // FULL-FRAME HAND CLUSTER & EXTENDED INDEX FINGER TRACKER (Zero Palm-Slipping, Zero Head)
         // =========================================================================================
-        // 1. Update Hand Anchor ONLY from confirmed hand skin motion points
-        if (motionPoints >= 6) {
-          const motionX = motionWeightedX / motionPoints;
-          const motionY = motionWeightedY / motionPoints;
-
-          // Never let hand anchor drift into the upper face zone (clamp y >= 26)
-          const clampedMotionY = Math.max(26, motionY);
-
-          const dist = Math.hypot(motionX - handAnchorRef.current.x, clampedMotionY - handAnchorRef.current.y);
-          if (dist > 30) {
-            handAnchorRef.current.x = motionX;
-            handAnchorRef.current.y = clampedMotionY;
-          } else if (dist > 4) {
-            handAnchorRef.current.x += (motionX - handAnchorRef.current.x) * 0.40;
-            handAnchorRef.current.y += (clampedMotionY - handAnchorRef.current.y) * 0.40;
-          }
-        }
-
-        // 2. Scan for hand skin pixels strictly around the hand anchor
-        const anchorX = Math.round(handAnchorRef.current.x);
-        const anchorY = Math.round(handAnchorRef.current.y);
-
-        const roiMinX = Math.max(0, anchorX - 28);
-        const roiMaxX = Math.min(127, anchorX + 28);
-        const roiMinY = Math.max(18, anchorY - 32);
-        const roiMaxY = Math.min(95, anchorY + 32);
-
         let handSkinCount = 0;
-        let handSumX = 0;
-        let handSumY = 0;
         let handMinX = 128, handMaxX = 0, handMinY = 96, handMaxY = 0;
 
-        for (let y = roiMinY; y <= roiMaxY; y++) {
+        // 1. Scan across the entire clean hand skin mask (outside face zone, y >= 16)
+        // Find global hand bounds and locate the absolute highest apex row
+        let fingerApexY = -1;
+        let fingerApexX = -1;
+
+        for (let y = 16; y <= 95; y++) {
           const rowOffset = y * 128;
-          for (let x = roiMinX; x <= roiMaxX; x++) {
+          let rowSkinCount = 0;
+          let rowMinX = 128;
+          let rowMaxX = 0;
+
+          for (let x = 0; x < 128; x++) {
             if (skinMask[rowOffset + x] === 1) {
               handSkinCount++;
-              handSumX += x;
-              handSumY += y;
+              rowSkinCount++;
               if (x < handMinX) handMinX = x;
               if (x > handMaxX) handMaxX = x;
               if (y < handMinY) handMinY = y;
               if (y > handMaxY) handMaxY = y;
+
+              if (x < rowMinX) rowMinX = x;
+              if (x > rowMaxX) rowMaxX = x;
             }
+          }
+
+          // The very first row from top down that contains 2 to 14 pixels with a narrow span (<= 16px)
+          // is definitively the peak of the outstretched INDEX FINGER!
+          if (fingerApexY === -1 && rowSkinCount >= 2 && rowSkinCount <= 14 && (rowMaxX - rowMinX + 1) <= 16) {
+            fingerApexY = y;
+            fingerApexX = Math.round((rowMinX + rowMaxX) / 2);
           }
         }
 
         let rawTargetX: number | null = null;
         let rawTargetY: number | null = null;
 
-        if (handSkinCount >= 16) {
-          const handCx = handSumX / handSkinCount;
-          const handCy = handSumY / handSkinCount;
+        // 2. If an apex was detected, isolate the INDEX FINGER shaft and calculate subpixel tip
+        if (fingerApexY !== -1 && fingerApexX !== -1) {
+          // Corridor strictly isolates the INDEX FINGER from thumb, knuckles, and palm
+          const corridorMinX = Math.max(0, fingerApexX - 7);
+          const corridorMaxX = Math.min(127, fingerApexX + 7);
 
-          // Hysteresis deadband for anchor center update: ignore micro-shifts < 4px
-          const anchorDrift = Math.hypot(handCx - handAnchorRef.current.x, handCy - handAnchorRef.current.y);
-          if (anchorDrift > 4) {
-            handAnchorRef.current.x += (handCx - handAnchorRef.current.x) * 0.20;
-            handAnchorRef.current.y += (Math.max(26, handCy) - handAnchorRef.current.y) * 0.20;
-          }
+          let fingerPixels = 0;
+          let weightSum = 0;
+          let weightedX = 0;
+          let weightedY = 0;
 
-          // 3-TIER CYLINDRICAL FINGERTIP MORPHOLOGY VERIFICATION
-          // Rejects Heads, Foreheads, Shoulders, Body Torso, Wall Pictures
-          // Level 1: Apex Tip (rows handMinY .. handMinY + 2)
-          let l1MinX = 128, l1MaxX = 0;
-          for (let y = handMinY; y <= Math.min(handMaxY, handMinY + 2); y++) {
+          // Trace down the finger for up to 6 rows to confirm physical continuity
+          const checkLimit = Math.min(handMaxY, fingerApexY + 6);
+          for (let y = fingerApexY; y <= checkLimit; y++) {
             const rowOffset = y * 128;
-            for (let x = handMinX; x <= handMaxX; x++) {
+            for (let x = corridorMinX; x <= corridorMaxX; x++) {
               if (skinMask[rowOffset + x] === 1) {
-                if (x < l1MinX) l1MinX = x;
-                if (x > l1MaxX) l1MaxX = x;
-              }
-            }
-          }
-          const w1 = l1MaxX >= l1MinX ? (l1MaxX - l1MinX + 1) : 0;
-
-          // Level 2: Finger Shaft (rows handMinY + 3 .. handMinY + 5)
-          let l2MinX = 128, l2MaxX = 0;
-          for (let y = Math.min(handMaxY, handMinY + 3); y <= Math.min(handMaxY, handMinY + 5); y++) {
-            const rowOffset = y * 128;
-            for (let x = handMinX; x <= handMaxX; x++) {
-              if (skinMask[rowOffset + x] === 1) {
-                if (x < l2MinX) l2MinX = x;
-                if (x > l2MaxX) l2MaxX = x;
-              }
-            }
-          }
-          const w2 = l2MaxX >= l2MinX ? (l2MaxX - l2MinX + 1) : 0;
-
-          // Level 3: Finger Base / Palm (rows handMinY + 6 .. handMinY + 9)
-          let l3MinX = 128, l3MaxX = 0;
-          for (let y = Math.min(handMaxY, handMinY + 6); y <= Math.min(handMaxY, handMinY + 9); y++) {
-            const rowOffset = y * 128;
-            for (let x = handMinX; x <= handMaxX; x++) {
-              if (skinMask[rowOffset + x] === 1) {
-                if (x < l3MinX) l3MinX = x;
-                if (x > l3MaxX) l3MaxX = x;
-              }
-            }
-          }
-          const w3 = l3MaxX >= l3MinX ? (l3MaxX - l3MinX + 1) : 0;
-
-          // Strict finger criteria:
-          // 1. Apex tip must be narrow (3px <= w1 <= 13px)
-          // 2. Shaft must be narrow cylinder (3px <= w2 <= 19px) - FOREHEAD / HEAD is >= 25px here!
-          // 3. Base must not balloon out immediately into a giant torso dome (w3 <= 28px)
-          const isValidFingertip = (w1 >= 3 && w1 <= 13) &&
-                                   (w2 >= 3 && w2 <= 19) &&
-                                   (w3 <= 28);
-
-          if (isValidFingertip) {
-            let weightSum = 0;
-            let weightedX = 0;
-            let weightedY = 0;
-            const apexSliceLimit = Math.min(handMaxY, handMinY + 4);
-
-            for (let y = handMinY; y <= apexSliceLimit; y++) {
-              const rowDist = y - handMinY;
-              const rowWeight = (5 - rowDist) * (5 - rowDist); // 25, 16, 9, 4, 1
-
-              const rowOffset = y * 128;
-              for (let x = handMinX; x <= handMaxX; x++) {
-                if (skinMask[rowOffset + x] === 1) {
-                  weightedX += x * rowWeight;
-                  weightedY += y * rowWeight;
-                  weightSum += rowWeight;
+                fingerPixels++;
+                // Ultra top-heavy weighting: rows 0..3 have 95% of total weight to lock squarely on the nail/tip
+                const distFromTip = y - fingerApexY;
+                if (distFromTip <= 4) {
+                  const w = (5 - distFromTip) * (5 - distFromTip); // 25, 16, 9, 4, 1
+                  weightedX += x * w;
+                  weightedY += y * w;
+                  weightSum += w;
                 }
               }
             }
+          }
 
-            if (weightSum > 0) {
-              const subpixelX = weightedX / weightSum;
-              const subpixelY = weightedY / weightSum;
+          // A real protruding finger has at least 5 connected pixels in its top 6 rows
+          if (fingerPixels >= 5 && weightSum > 0) {
+            const subpixelX = weightedX / weightSum;
+            const subpixelY = weightedY / weightSum;
 
-              // Mirrored X for natural user orientation (like looking in a mirror)
-              rawTargetX = (1 - subpixelX / 128) * 100;
-              rawTargetY = (subpixelY / 96) * 100;
-            }
+            // Mirrored X for natural user orientation (like looking in a mirror)
+            rawTargetX = (1 - subpixelX / 128) * 100;
+            rawTargetY = (subpixelY / 96) * 100;
+
+            // Lock hand anchor directly to the index fingertip!
+            handAnchorRef.current.x = subpixelX;
+            handAnchorRef.current.y = subpixelY;
           }
         }
 
-        // NOTE: Absolute Zero Head/Noise Fallback:
-        // If no confirmed finger is detected, rawTargetX remains null and cursor holds position.
+        // NOTE: Absolute Zero Fallback to Palm or Head:
+        // If no confirmed finger apex is detected, rawTargetX remains null and cursor holds position stably.
 
         if (rawTargetX !== null && rawTargetY !== null) {
           const currentX = handPosRef.current.x;
