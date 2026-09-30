@@ -18,7 +18,9 @@ import {
   Crosshair,
   Lightbulb,
   AlertCircle,
-  ChevronRight
+  ChevronRight,
+  Terminal,
+  Compass
 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getFishName, getFishDescription, getRarityName } from '../i18n/translations';
@@ -37,6 +39,29 @@ interface Position2D {
   y: number; // 0 to 100 percentage
 }
 
+// Module-level cache flag so preloading only happens once per session
+let isGlobalAssetsPreloaded = false;
+
+const ASSETS_TO_PRELOAD = [
+  { type: 'video', url: '/assets/video_reeling_idle.mp4', label: 'Океанический фон штиля' },
+  { type: 'video', url: '/assets/video_catch_boot.mp4', label: 'Анимация вылова: Старый сапог' },
+  { type: 'video', url: '/assets/video_catch_salmon.mp4', label: 'Анимация вылова: Серебристый лосось' },
+  { type: 'video', url: '/assets/video_catch_fish.mp4', label: 'Анимация вылова: Золотой карась' },
+  { type: 'video', url: '/assets/video_catch_generic.mp4', label: 'Анимация вылова: Глубинный удильщик' },
+  { type: 'video', url: '/assets/video_catch_megalodon.mp4', label: 'Анимация вылова: Доисторический мегалодон' },
+  { type: 'video', url: '/assets/video_catch_sea_serpent.mp4', label: 'Анимация вылова: Левиафан бездны' },
+  { type: 'video', url: '/assets/video_catch_celestial_whale.mp4', label: 'Анимация вылова: Небесный кит' },
+  { type: 'video', url: '/assets/video_jellyfish_emerge.mp4', label: 'Анимация вылова: Арканная медуза' },
+  { type: 'image', url: '/assets/card_boot.jpg', label: 'Карточка: Старый сапог' },
+  { type: 'image', url: '/assets/card_salmon.jpg', label: 'Карточка: Серебристый лосось' },
+  { type: 'image', url: '/assets/card_goldfish.jpg', label: 'Карточка: Золотой карась' },
+  { type: 'image', url: '/assets/card_anglerfish.jpg', label: 'Карточка: Глубинный удильщик' },
+  { type: 'image', url: '/assets/card_megalodon.jpg', label: 'Карточка: Доисторический мегалодон' },
+  { type: 'image', url: '/assets/card_sea_serpent.jpg', label: 'Карточка: Левиафан бездны' },
+  { type: 'image', url: '/assets/card_celestial_whale.jpg', label: 'Карточка: Небесный кит' },
+  { type: 'image', url: '/assets/card_arcane_jellyfish.jpg', label: 'Карточка: Арканная медуза' }
+];
+
 export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, openBestiary, setTab }) => {
   const { language, t } = useLanguage();
   const [stage, setStage] = useState<GameStage>('IDLE');
@@ -46,6 +71,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
   const [isCatchCardRevealed, setIsCatchCardRevealed] = useState(false);
   const catchCinematicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Asset Preloader State
+  const [isPreloading, setIsPreloading] = useState(!isGlobalAssetsPreloaded);
+  const [preloadProgress, setPreloadProgress] = useState(isGlobalAssetsPreloaded ? 100 : 0);
+  const [preloadStatus, setPreloadStatus] = useState('ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ...');
 
   // Guide modal state
   const [isGuideOpen, setIsGuideOpen] = useState(false);
@@ -264,6 +294,75 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       if (foulIntervalRef.current) clearInterval(foulIntervalRef.current);
       if (biteIntervalRef.current) clearInterval(biteIntervalRef.current);
       if (catchCinematicTimerRef.current) clearTimeout(catchCinematicTimerRef.current);
+    };
+  }, []);
+
+  // Concurrent Asset Preloader (Buffers all 17 videos and cards into memory/browser disk cache)
+  useEffect(() => {
+    if (isGlobalAssetsPreloaded) {
+      setIsPreloading(false);
+      return;
+    }
+
+    let isMounted = true;
+    let completed = 0;
+    const total = ASSETS_TO_PRELOAD.length;
+
+    const onAssetLoaded = (label: string) => {
+      completed++;
+      if (!isMounted) return;
+      const pct = Math.min(100, Math.round((completed / total) * 100));
+      setPreloadProgress(pct);
+      setPreloadStatus(label);
+
+      if (completed >= total) {
+        setTimeout(() => {
+          if (isMounted) {
+            isGlobalAssetsPreloaded = true;
+            setIsPreloading(false);
+            sound.playReelClick();
+          }
+        }, 350);
+      }
+    };
+
+    // Preload each asset concurrently:
+    ASSETS_TO_PRELOAD.forEach(async (asset) => {
+      try {
+        if (asset.type === 'video') {
+          // Fetch into browser cache so it's instantly available without network delay
+          const res = await fetch(asset.url);
+          if (res.ok) {
+            await res.blob();
+          }
+        } else {
+          // Image preload
+          await new Promise<void>((resolve) => {
+            const img = new Image();
+            img.src = asset.url;
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+            setTimeout(resolve, 3000);
+          });
+        }
+      } catch {
+        // Continue even if an individual asset fails
+      }
+      onAssetLoaded(asset.label);
+    });
+
+    // Safety fallback: if anything hangs, guarantee game starts within 5s
+    const timeout = setTimeout(() => {
+      if (isMounted && !isGlobalAssetsPreloaded) {
+        isGlobalAssetsPreloaded = true;
+        setPreloadProgress(100);
+        setIsPreloading(false);
+      }
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
     };
   }, []);
 
@@ -839,7 +938,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     }, 100);
   };
 
-  // Strike Handler: Immediately launches the high quality catch video upon successful hook!
+  // Strike Handler: Enters the Reeling Phase where player holds their finger on the moving target area!
   const handleStrike = () => {
     if (stageRef.current !== 'BITE') return;
     if (biteIntervalRef.current) {
@@ -856,8 +955,26 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     isRoundFinishedRef.current = false;
     hasAwardedRef.current = false;
 
-    // Immediately launch the full-screen catch video!
-    triggerCatchSuccess();
+    // Reset positions to center
+    fishPosRef.current = { x: 50, y: 50 };
+    fishTargetRef.current = { x: 50, y: 50 };
+    fishTimerRef.current = 0;
+
+    // Dynamic starting progress by rarity tier
+    const startProgress = getInitialProgress(targetFish.rarity);
+    currentProgressRef.current = startProgress;
+    setCatchProgress(startProgress);
+
+    // Reset cumulative off-target timer (2.8s tolerance)
+    cumulativeOffTargetMsRef.current = 0;
+    setOffTargetMs(0);
+    lastTickTimeRef.current = Date.now();
+
+    setFishPos({ x: 50, y: 50 });
+    setIsLockedOn(false);
+    setControlWarning(null);
+    setStage('REELING');
+    stageRef.current = 'REELING';
   };
 
   // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion & 1.5s Cumulative Snap!
@@ -1256,6 +1373,64 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     >
       {/* Hidden Motion Detection Canvas */}
       <canvas ref={motionCanvasRef} className="hidden" />
+
+      {/* FULL ASSET PRELOADER SCREEN */}
+      {isPreloading && (
+        <div className="absolute inset-0 z-50 bg-[#06100a] flex flex-col items-center justify-center p-4 sm:p-6 text-center select-none font-arcade">
+          <div className="absolute inset-0 scanlines opacity-60 pointer-events-none" />
+
+          <div className="relative z-10 max-w-md w-full bg-black/95 border-2 border-emerald-400 p-6 pixel-corners shadow-[0_0_60px_rgba(16,185,129,0.5)] space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-emerald-500/30 pb-3">
+              <div className="flex items-center gap-2 text-emerald-400 text-xs">
+                <Terminal className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span className="tracking-widest font-bold">RODMAX ENGINE // V2.0</span>
+              </div>
+              <div className="text-[9px] font-mono text-cyan-300">
+                17 / 17 РЕСУРСОВ
+              </div>
+            </div>
+
+            {/* Radar / Sonar Calibration Graphic */}
+            <div className="flex justify-center py-2">
+              <div className="relative w-20 h-20 rounded-full border border-emerald-400/40 flex items-center justify-center shadow-[0_0_25px_rgba(16,185,129,0.3)]">
+                <div className="w-16 h-16 rounded-full border border-cyan-400/30 animate-ping absolute" />
+                <div className="w-10 h-10 rounded-full border-2 border-dashed border-emerald-400 animate-[spin_4s_linear_infinite] absolute" />
+                <Compass className="w-6 h-6 text-amber-300 animate-pulse" />
+              </div>
+            </div>
+
+            {/* Progress Telemetry */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] text-zinc-300 font-arcade">
+                <span className="text-emerald-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{language === 'ru' ? 'КЭШИРОВАНИЕ ВИДЕО И КАРТОЧЕК:' : 'CACHING VIDEOS & CARDS:'}</span>
+                </span>
+                <span className="text-amber-300 font-mono font-bold text-xs">{preloadProgress}%</span>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full h-4 bg-zinc-950 border border-emerald-400/70 p-0.5 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 shadow-[0_0_15px_#34d399] transition-all duration-150"
+                  style={{ width: `${Math.min(100, Math.max(0, preloadProgress))}%` }}
+                />
+              </div>
+
+              {/* Status Line */}
+              <div className="text-[9px] font-mono text-zinc-400 truncate pt-1 text-left">
+                &gt; {preloadStatus}
+              </div>
+            </div>
+
+            <div className="text-[8px] font-mono text-zinc-500 border-t border-emerald-500/20 pt-2 flex justify-between">
+              <span>{language === 'ru' ? 'СКОРОСТЬ ВЫГРУЗКИ: 60 FPS' : 'STREAM RATE: 60 FPS'}</span>
+              <span className="text-emerald-400 font-bold">{language === 'ru' ? 'БЕЗ ЛАГОВ' : 'ZERO LAG READY'}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 1. Main Viewport Video Background */}
       <div className="absolute inset-0 z-0 bg-black">
