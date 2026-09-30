@@ -40,6 +40,7 @@ interface Position2D {
 export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, openBestiary, setTab }) => {
   const { language, t } = useLanguage();
   const [stage, setStage] = useState<GameStage>('IDLE');
+  const stageRef = useRef<GameStage>('IDLE');
   const [targetFish, setTargetFish] = useState<FishItem>(FISH_DATABASE[1]);
   const targetFishRef = useRef<FishItem>(FISH_DATABASE[1]);
   const [lastCaught, setLastCaught] = useState<CaughtFish | null>(null);
@@ -237,6 +238,11 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
       }
     };
   }, [cameraEnabled]);
+
+  // Keep stageRef always synchronized with current stage
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
 
   // Ensure webcam video elements get the stream attached as soon as they mount
   useEffect(() => {
@@ -465,89 +471,141 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
         }
 
         // =========================================================================================
-        // FULL-FRAME HAND CLUSTER & EXTENDED INDEX FINGER TRACKER (Zero Palm-Slipping, Zero Head)
+        // STRICT INDEX FINGERTIP TRACKER (Zero Palm, Zero Wrist, Zero Forearm, Zero Body)
         // =========================================================================================
         let handSkinCount = 0;
         let handMinX = 128, handMaxX = 0, handMinY = 96, handMaxY = 0;
+        let handSumX = 0, handSumY = 0;
 
-        // 1. Scan across the entire clean hand skin mask (outside face zone, y >= 16)
-        // Find global hand bounds and locate the absolute highest apex row
-        let fingerApexY = -1;
-        let fingerApexX = -1;
-
+        // 1. Scan clean hand skin mask (outside face zone, y >= 16) to find hand bounding box and centroid
         for (let y = 16; y <= 95; y++) {
           const rowOffset = y * 128;
-          let rowSkinCount = 0;
-          let rowMinX = 128;
-          let rowMaxX = 0;
-
           for (let x = 0; x < 128; x++) {
             if (skinMask[rowOffset + x] === 1) {
               handSkinCount++;
-              rowSkinCount++;
+              handSumX += x;
+              handSumY += y;
               if (x < handMinX) handMinX = x;
               if (x > handMaxX) handMaxX = x;
               if (y < handMinY) handMinY = y;
               if (y > handMaxY) handMaxY = y;
-
-              if (x < rowMinX) rowMinX = x;
-              if (x > rowMaxX) rowMaxX = x;
             }
-          }
-
-          // The very first row from top down that contains 2 to 14 pixels with a narrow span (<= 16px)
-          // is definitively the peak of the outstretched INDEX FINGER!
-          if (fingerApexY === -1 && rowSkinCount >= 2 && rowSkinCount <= 14 && (rowMaxX - rowMinX + 1) <= 16) {
-            fingerApexY = y;
-            fingerApexX = Math.round((rowMinX + rowMaxX) / 2);
           }
         }
 
         let rawTargetX: number | null = null;
         let rawTargetY: number | null = null;
 
-        // 2. If an apex was detected, isolate the INDEX FINGER shaft and calculate subpixel tip
-        if (fingerApexY !== -1 && fingerApexX !== -1) {
-          // Corridor strictly isolates the INDEX FINGER from thumb, knuckles, and palm
-          const corridorMinX = Math.max(0, fingerApexX - 7);
-          const corridorMaxX = Math.min(127, fingerApexX + 7);
+        // 2. Only proceed if there is a real hand presence
+        if (handSkinCount >= 15) {
+          const handCentroidY = handSumY / handSkinCount;
+          // STRICT RULE: The extended index finger is the uppermost extremity. It is ALWAYS strictly above the hand centroid!
+          // We forbid searching for a fingertip at or below the centroid or near the bottom boundary (y >= 72),
+          // which permanently prevents the cursor from dropping to the wrist, forearm, or lower arm ("то что ниже")!
+          const maxApexSearchY = Math.min(Math.floor(handCentroidY - 1), 72);
 
-          let fingerPixels = 0;
-          let weightSum = 0;
-          let weightedX = 0;
-          let weightedY = 0;
+          let fingerApexY = -1;
+          let fingerApexX = -1;
 
-          // Trace down the finger for up to 6 rows to confirm physical continuity
-          const checkLimit = Math.min(handMaxY, fingerApexY + 6);
-          for (let y = fingerApexY; y <= checkLimit; y++) {
+          // 3. Scan row-by-row strictly from handMinY down to maxApexSearchY
+          // Find the topmost narrow protrusion (the extended index finger)
+          for (let y = handMinY; y <= maxApexSearchY; y++) {
             const rowOffset = y * 128;
-            for (let x = corridorMinX; x <= corridorMaxX; x++) {
+            
+            // Scan for contiguous skin runs in this row within the hand horizontal bounds
+            let inRun = false;
+            let runStart = 0;
+            let bestRunWidth = 999;
+            let bestRunCenter = -1;
+
+            for (let x = handMinX; x <= handMaxX + 1; x++) {
+              const isSkin = x <= handMaxX && skinMask[rowOffset + x] === 1;
+              if (isSkin && !inRun) {
+                inRun = true;
+                runStart = x;
+              } else if (!isSkin && inRun) {
+                inRun = false;
+                const runWidth = x - runStart;
+                // An outstretched index finger has a narrow span (2 to 14 pixels)
+                if (runWidth >= 2 && runWidth <= 14) {
+                  if (runWidth < bestRunWidth) {
+                    bestRunWidth = runWidth;
+                    bestRunCenter = Math.round(runStart + runWidth / 2);
+                  }
+                }
+              }
+            }
+
+            if (bestRunCenter !== -1) {
+              // Verify vertical finger shaft continuity: must connect downwards for at least 3-4 rows
+              let shaftPixels = 0;
+              const checkLimit = Math.min(y + 5, handMaxY);
+              for (let sy = y; sy <= checkLimit; sy++) {
+                const sOffset = sy * 128;
+                for (let sx = bestRunCenter - 5; sx <= bestRunCenter + 5; sx++) {
+                  if (sx >= 0 && sx < 128 && skinMask[sOffset + sx] === 1) {
+                    shaftPixels++;
+                  }
+                }
+              }
+
+              if (shaftPixels >= 4) {
+                fingerApexY = y;
+                fingerApexX = bestRunCenter;
+                break; // Found the true highest finger apex!
+              }
+            }
+          }
+
+          // Fallback if finger is slightly angled: use the topmost skin point of the hand
+          if (fingerApexY === -1 && handMinY <= maxApexSearchY) {
+            fingerApexY = handMinY;
+            const rowOffset = handMinY * 128;
+            let rowSumX = 0, rowCount = 0;
+            for (let x = handMinX; x <= handMaxX; x++) {
               if (skinMask[rowOffset + x] === 1) {
-                fingerPixels++;
-                // Ultra top-heavy weighting: rows 0..3 have 95% of total weight to lock squarely on the nail/tip
-                const distFromTip = y - fingerApexY;
-                if (distFromTip <= 4) {
-                  const w = (5 - distFromTip) * (5 - distFromTip); // 25, 16, 9, 4, 1
+                rowSumX += x;
+                rowCount++;
+              }
+            }
+            if (rowCount > 0) {
+              fingerApexX = Math.round(rowSumX / rowCount);
+            }
+          }
+
+          // 4. Calculate subpixel position weighted squarely on the fingertip apex
+          if (fingerApexY !== -1 && fingerApexX !== -1) {
+            let weightedX = 0;
+            let weightedY = 0;
+            let weightSum = 0;
+
+            const tipLimit = Math.min(fingerApexY + 4, handMaxY);
+            for (let y = fingerApexY; y <= tipLimit; y++) {
+              const rowOffset = y * 128;
+              for (let x = fingerApexX - 6; x <= fingerApexX + 6; x++) {
+                if (x >= 0 && x < 128 && skinMask[rowOffset + x] === 1) {
+                  // Apex weight: top row gets weight 25, then 16, 9, 4, 1
+                  const dist = y - fingerApexY;
+                  const w = (5 - dist) * (5 - dist);
                   weightedX += x * w;
                   weightedY += y * w;
                   weightSum += w;
                 }
               }
             }
-          }
 
-          // A real protruding finger has at least 5 connected pixels in its top 6 rows
-          if (fingerPixels >= 5 && weightSum > 0) {
-            const subpixelX = weightedX / weightSum;
-            const subpixelY = weightedY / weightSum;
+            if (weightSum > 0) {
+              const subpixelX = weightedX / weightSum;
+              const subpixelY = weightedY / weightSum;
 
-            // Mirrored X for natural user orientation (like looking in a mirror)
-            rawTargetX = (1 - subpixelX / 128) * 100;
-            rawTargetY = (subpixelY / 96) * 100;
+              // Mirrored X for natural user orientation (like looking in a mirror)
+              rawTargetX = (1 - subpixelX / 128) * 100;
+              rawTargetY = (subpixelY / 96) * 100;
 
-            // Lock hand anchor directly to the index fingertip!
-            handAnchorRef.current.x = subpixelX;
-            handAnchorRef.current.y = subpixelY;
+              // Lock hand anchor directly to the index fingertip!
+              handAnchorRef.current.x = subpixelX;
+              handAnchorRef.current.y = subpixelY;
+            }
           }
         }
 
@@ -785,12 +843,14 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
     sound.playCast();
     setStage('CASTING');
+    stageRef.current = 'CASTING';
     setDepth(30 + Math.floor(Math.random() * 220));
 
     setTimeout(() => {
       sound.playSplash();
       setStage('WAITING');
-      const biteDelay = 3500 + Math.random() * 4000; // 3.5s to 7.5s realistic suspense
+      stageRef.current = 'WAITING';
+      const biteDelay = 2600 + Math.random() * 3200; // 2.6s to 5.8s realistic suspense
       scheduleBite(biteDelay);
     }, 900);
   };
@@ -803,7 +863,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
   };
 
   const triggerBiteSequence = () => {
-    if (stage !== 'WAITING' || isRoundFinishedRef.current) return;
+    if (stageRef.current !== 'WAITING' || isRoundFinishedRef.current) return;
 
     if (foulIntervalRef.current) {
       clearInterval(foulIntervalRef.current);
@@ -819,6 +879,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     targetFishRef.current = rolled;
     setTargetFish(rolled);
     setStage('BITE');
+    stageRef.current = 'BITE';
 
     // Strike window: 1.10s for fair reaction time with optical camera
     setBiteTimeLeft(1.10);
@@ -844,7 +905,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Fault Mode: Early twitch / false movement penalty during WAITING stage
   const triggerEarlyFoul = () => {
-    if (stage !== 'WAITING') return;
+    if (stageRef.current !== 'WAITING') return;
 
     const now = Date.now();
     if (now - lastFoulTimeRef.current > 400) {
@@ -855,9 +916,9 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setIsFoul(true);
     setFoulTimeLeft(2.0);
 
-    // Push back bite by adding 2.0s penalty + 3.5s to 6.5s calm-down delay
+    // Push back bite by adding 2.0s penalty + 2.5s to 4.5s calm-down delay
     if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
-    const penaltyDelay = 2000 + 3500 + Math.random() * 3000;
+    const penaltyDelay = 2000 + 2500 + Math.random() * 2000;
     waitingTimerRef.current = setTimeout(() => {
       triggerBiteSequence();
     }, penaltyDelay);
@@ -882,7 +943,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
 
   // Strike Handler
   const handleStrike = () => {
-    if (stage !== 'BITE') return;
+    if (stageRef.current !== 'BITE') return;
     if (biteIntervalRef.current) {
       clearInterval(biteIntervalRef.current);
       biteIntervalRef.current = null;
@@ -907,7 +968,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     currentProgressRef.current = startProgress;
     setCatchProgress(startProgress);
 
-    // Reset cumulative off-target timer (1.5s tolerance)
+    // Reset cumulative off-target timer (2.5s tolerance)
     cumulativeOffTargetMsRef.current = 0;
     setOffTargetMs(0);
     lastTickTimeRef.current = Date.now();
@@ -916,6 +977,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
     setIsLockedOn(false);
     setControlWarning(null);
     setStage('REELING');
+    stageRef.current = 'REELING';
   };
 
   // 3. REELING TICK LOOP: Direct "Finger on Fish" Mechanic with Active Evasion & 1.5s Cumulative Snap!
@@ -1478,7 +1540,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                 </div>
                 
                 <div className="space-y-1 font-mono text-[9px] text-zinc-200">
-                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'Не двигайте рукой' : 'Do not move hand'}</span> {language === 'ru' ? 'до поклевки (иначе штраф за фальстарт).' : 'before bite (false start penalty).'}</div>
+                  <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'Не двигайте рукой' : 'Do not move hand'}</span> {language === 'ru' ? 'до поклевки (иначе штраф за фальшстарт).' : 'before bite (false start penalty).'}</div>
                   <div>• <span className="text-amber-300 font-bold">{language === 'ru' ? 'При надписи «КЛЮЕТ!»' : 'When «FISH ON!» appears'}</span> {language === 'ru' ? 'резко дерните пальцем в камеру (окно 1.1с).' : 'rapidly thrust finger toward camera (1.1s).'}</div>
                   <div>• <span className="text-emerald-400 font-bold">{language === 'ru' ? 'Ведите пальцем за рыбой:' : 'Steer finger over fish:'}</span> {language === 'ru' ? 'следите за бирюзовым прицелом ☝️ в окне камеры справа внизу.' : 'track the cyan reticle ☝️ in bottom-right camera view.'}</div>
                 </div>
@@ -1914,7 +1976,7 @@ export const FishingGame: React.FC<FishingGameProps> = ({ profile, onCatchFish, 
                       : `HINT (FAILED TO CATCH ${consecutiveFails} TIMES):`}
                   </span>
                 </div>
-                <div>• {language === 'ru' ? 'Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальстарт).' : 'Do not move hand before «FISH ON!» (or false start).'}</div>
+                <div>• {language === 'ru' ? 'Не двигайте рукой до сигнала «КЛЮЕТ!» (иначе фальшстарт).' : 'Do not move hand before «FISH ON!» (or false start).'}</div>
                 <div>• {language === 'ru' ? 'При поклевке резко двиньте палец в камеру за 1.1с.' : 'When bite occurs, rapidly thrust finger towards camera within 1.1s.'}</div>
                 <div>• {language === 'ru' ? 'В вываживании держите бирюзовый прицел ☝️ на рыбе.' : 'During reeling, keep the cyan reticle ☝️ over the fish.'}</div>
               </div>
